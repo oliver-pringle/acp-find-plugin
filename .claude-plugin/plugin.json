@@ -1,0 +1,21 @@
+{
+  "name": "acp-find",
+  "version": "0.1.0",
+  "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace. Helps you discover on-chain agents and offerings without leaving Claude Code.",
+  "author": {
+    "name": "Oliver Pringle",
+    "url": "https://github.com/oliver-pringle"
+  },
+  "homepage": "https://github.com/oliver-pringle/acp-find-plugin",
+  "repository": "https://github.com/oliver-pringle/acp-find-plugin",
+  "license": "MIT",
+  "keywords": [
+    "acp",
+    "agent-commerce-protocol",
+    "virtuals-protocol",
+    "blockchain",
+    "agents",
+    "marketplace",
+    "search"
+  ]
+}
