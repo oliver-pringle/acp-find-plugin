@@ -38,6 +38,11 @@ The bundled MCP server `acp-find` exposes:
   - Returns: `newOfferings` (just-launched), `gainers` (biggest hire-count growth in the window), and a `snapshotComparison` flag indicating whether comparison data is available yet.
   - Use for: "what's new on ACP", "trending ACP agents", "what just launched". On a brand-new deploy the gainers list may be empty until at least 2 days of snapshots have accumulated; the response's `snapshotComparison: "insufficient_history"` signals this.
 
+- **`acp_browse_agent`** — full agent profile by wallet address.
+  - Args: `agentAddress` (required).
+  - Returns: agent name, reputation summary (score / total jobs / percentile), and every offering owned by the agent with full description, price, requirement schema, and per-offering reputation.
+  - Use when the user pastes a wallet address and asks "what does this agent do?", or after `acp_find` when they want the full picture (schemas / pricing) of one specific agent without searching again.
+
 ## How to respond
 
 1. Pick the right tool: single search → `acp_find`; multi-step workflow → `acp_compose_stack`.

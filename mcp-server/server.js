@@ -14,7 +14,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.1.4";
+const SERVER_VERSION = "0.1.5";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
@@ -120,6 +120,21 @@ const TOOLS = [
         }
       }
     }
+  },
+  {
+    name: "acp_browse_agent",
+    description:
+      "Full profile for an ACP agent by wallet address. Returns the agent's reputation summary plus every offering they own with full descriptions, requirement schemas, prices, and per-offering reputation. Use when the user pastes a wallet address and asks 'what does this agent do', or after acp_find when the user wants the full picture of a specific agent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        }
+      },
+      required: ["agentAddress"]
+    }
   }
 ];
 
@@ -180,6 +195,10 @@ async function dispatchTool(name, args) {
   if (name === "acp_today") {
     const days = typeof args?.days === "number" ? args.days : 1;
     return callGateway(`/v1/digest?days=${encodeURIComponent(days)}`, undefined, "GET");
+  }
+  if (name === "acp_browse_agent") {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    return callGateway(`/v1/agent/${encodeURIComponent(args.agentAddress)}`, undefined, "GET");
   }
   throw new Error(`Unknown tool: ${name}`);
 }
