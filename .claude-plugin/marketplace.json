@@ -1,0 +1,14 @@
+{
+  "name": "acp-find-marketplace",
+  "owner": {
+    "name": "Oliver Pringle",
+    "url": "https://github.com/oliver-pringle"
+  },
+  "plugins": [
+    {
+      "name": "acp-find",
+      "source": "./",
+      "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace, as a Claude Code plugin."
+    }
+  ]
+}
