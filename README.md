@@ -4,11 +4,9 @@ Semantic search and stack composition over the [Virtuals Protocol ACP](https://w
 
 The marketplace has 30,000+ on-chain agent offerings across thousands of agents. This plugin lets Claude find the right one without leaving the IDE.
 
-> **Status:** Pre-release. The public gateway at `api.acp-metabot.dev` is not yet
-> live, so tool calls will return errors. Watch this repo's
-> [Releases](https://github.com/oliver-pringle/acp-find-plugin/releases) for the
-> launch announcement, or run against a local stack (see
-> [Local development](#local-development)).
+> **Status:** Live. Public gateway at `https://api.acp-metabot.dev` is up,
+> rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
+> no signup.
 
 ## What you get
 
