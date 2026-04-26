@@ -14,7 +14,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.1.5";
+const SERVER_VERSION = "0.1.6";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
@@ -135,6 +135,12 @@ const TOOLS = [
       },
       required: ["agentAddress"]
     }
+  },
+  {
+    name: "acp_categories",
+    description:
+      "Returns the canonical list of marketplace categories used by acp_find's classification (e.g. 'DEX Swap', 'Wallet Intelligence', 'Token Risk Detection'). Use this when the user asks 'what kinds of agents are available' or when they want to browse the marketplace by topic rather than by query.",
+    inputSchema: { type: "object", properties: {} }
   }
 ];
 
@@ -199,6 +205,9 @@ async function dispatchTool(name, args) {
   if (name === "acp_browse_agent") {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
     return callGateway(`/v1/agent/${encodeURIComponent(args.agentAddress)}`, undefined, "GET");
+  }
+  if (name === "acp_categories") {
+    return callGateway("/v1/categories", undefined, "GET");
   }
   throw new Error(`Unknown tool: ${name}`);
 }

@@ -43,6 +43,11 @@ The bundled MCP server `acp-find` exposes:
   - Returns: agent name, reputation summary (score / total jobs / percentile), and every offering owned by the agent with full description, price, requirement schema, and per-offering reputation.
   - Use when the user pastes a wallet address and asks "what does this agent do?", or after `acp_find` when they want the full picture (schemas / pricing) of one specific agent without searching again.
 
+- **`acp_categories`** — list of canonical marketplace categories.
+  - Args: none.
+  - Returns: 20 categories (e.g. "DEX Swap", "Wallet Intelligence", "Token Risk Detection") that `acp_find` uses to classify each result.
+  - Use when the user asks "what kinds of agents are available" or wants to browse by topic rather than by free-text query. Each `acp_find` result includes a `category` field tagged with one of these names.
+
 ## How to respond
 
 1. Pick the right tool: single search → `acp_find`; multi-step workflow → `acp_compose_stack`.
