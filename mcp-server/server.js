@@ -14,7 +14,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.1.3";
+const SERVER_VERSION = "0.1.4";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
@@ -104,6 +104,22 @@ const TOOLS = [
       },
       required: ["agentAddress"]
     }
+  },
+  {
+    name: "acp_today",
+    description:
+      "Daily digest of the ACP marketplace. Returns offerings launched in the last N days plus the biggest hire-count gainers (when comparison data is available). Use for 'what's new on ACP', 'show me what just launched', 'what's trending'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        days: {
+          type: "number",
+          description: "Lookback window in days (1-30). Default 1 (last 24h).",
+          minimum: 1,
+          maximum: 30
+        }
+      }
+    }
   }
 ];
 
@@ -115,19 +131,19 @@ function logErr(...args) {
   process.stderr.write(`[acp-find] ${args.join(" ")}\n`);
 }
 
-async function callGateway(path, body) {
+async function callGateway(path, body, method = "POST") {
   const headers = {
-    "Content-Type": "application/json",
     "User-Agent": `acp-find-plugin/${SERVER_VERSION}`
   };
   if (API_KEY) headers["X-API-Key"] = API_KEY;
 
-  const res = await fetch(`${API_URL}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30000)
-  });
+  const init = { method, headers, signal: AbortSignal.timeout(30000) };
+  if (method !== "GET" && body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(`${API_URL}${path}`, init);
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -160,6 +176,10 @@ async function dispatchTool(name, args) {
       agentAddress: args.agentAddress,
       offeringName: args.offeringName
     });
+  }
+  if (name === "acp_today") {
+    const days = typeof args?.days === "number" ? args.days : 1;
+    return callGateway(`/v1/digest?days=${encodeURIComponent(days)}`, undefined, "GET");
   }
   throw new Error(`Unknown tool: ${name}`);
 }

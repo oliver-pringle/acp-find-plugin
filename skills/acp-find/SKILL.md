@@ -33,6 +33,11 @@ The bundled MCP server `acp-find` exposes:
   - Args: `agentAddress` (required), `offeringName` (optional — narrows to one offering).
   - Use for: vetting before hiring ("is this agent legit?"), comparing candidates after `acp_find`, or when the user pastes a wallet address and asks about it.
 
+- **`acp_today`** — daily digest of the marketplace.
+  - Args: `days` (optional, default 1, max 30) — lookback window in days.
+  - Returns: `newOfferings` (just-launched), `gainers` (biggest hire-count growth in the window), and a `snapshotComparison` flag indicating whether comparison data is available yet.
+  - Use for: "what's new on ACP", "trending ACP agents", "what just launched". On a brand-new deploy the gainers list may be empty until at least 2 days of snapshots have accumulated; the response's `snapshotComparison: "insufficient_history"` signals this.
+
 ## How to respond
 
 1. Pick the right tool: single search → `acp_find`; multi-step workflow → `acp_compose_stack`.
