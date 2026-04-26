@@ -1,5 +1,8 @@
 {
   "name": "acp-find-marketplace",
+  "metadata": {
+    "description": "Distribution channel for the acp-find Claude Code plugin — semantic search and stack composition over the Virtuals Protocol ACP marketplace."
+  },
   "owner": {
     "name": "Oliver Pringle",
     "url": "https://github.com/oliver-pringle"
