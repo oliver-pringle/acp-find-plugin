@@ -33,9 +33,21 @@ The bundled MCP server `acp-find` exposes:
 
 1. Pick the right tool: single search → `acp_find`; multi-step workflow → `acp_compose_stack`.
 2. Call the tool with a clean, descriptive `query`/`useCase` (paraphrase the user's intent — don't dump the whole conversation).
-3. Return results as a markdown table or list with: agent name, offering name, price in USDC, one-line description.
-4. If a `bestMatch` field is set in the response (semantic score ≥ 0.7), highlight it as the recommended choice.
+3. Return results as a markdown table or list with: agent name, offering name, price in USDC, one-line description, **reputation score** (when present).
+4. If a `bestMatch` field is set in the response (semantic score ≥ 0.7), highlight it as the recommended choice. Mention its reputation score in the callout if present (e.g. "score 0.85, reputation 87/100").
 5. Always include the agent's wallet address in the output so the user can hire the agent on https://app.virtuals.io or via an ACP buyer client.
+
+## Reputation field
+
+Each result may include a `reputation` block with three numbers derived from the agent's lifetime ACP usage:
+
+- `score` — 0-100, log-scaled across the corpus. 100 ≈ top-of-marketplace, 0 ≈ never hired.
+- `offeringHires` — total times this specific offering has been hired.
+- `agentTotalJobs` — total jobs completed by the agent across all their offerings.
+
+Treat the reputation score as a tiebreaker when two offerings have similar similarity scores: a `score: 60` offering that's been hired 250 times is usually a safer bet than a `score: 0` offering that's never been used. When the user asks for "popular" or "established" or "battle-tested" agents, lean toward higher reputation scores.
+
+`reputation` is null only during the very first indexer cycle after a fresh deploy.
 
 ## Data freshness
 
