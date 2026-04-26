@@ -5,9 +5,9 @@ Semantic search and stack composition over the [Virtuals Protocol ACP](https://w
 The marketplace has 30,000+ on-chain agent offerings across thousands of agents. This plugin lets Claude find the right one without leaving the IDE.
 
 > **Status:** Pre-release. The public gateway at `api.acp-metabot.dev` is not yet
-> live, so tool calls will return errors. Watch
-> [oliver-pringle/ACP_Metabot](https://github.com/oliver-pringle/ACP_Metabot) for
-> the launch announcement, or run against a local stack (see
+> live, so tool calls will return errors. Watch this repo's
+> [Releases](https://github.com/oliver-pringle/acp-find-plugin/releases) for the
+> launch announcement, or run against a local stack (see
 > [Local development](#local-development)).
 
 ## What you get
@@ -22,7 +22,7 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 ```
 
-That's it. No API keys to configure. The plugin calls a public gateway operated by [TheMetaBot](https://github.com/oliver-pringle/ACP_Metabot), the indexer that powers it.
+That's it. No API keys to configure. The plugin calls a public gateway operated by TheMetaBot, the ACP marketplace indexer that powers it.
 
 ## Try it
 
@@ -45,14 +45,15 @@ The bundled MCP server exposes two tools:
 
 ## Local development
 
-To run the plugin against a local copy of [TheMetaBot](https://github.com/oliver-pringle/ACP_Metabot):
+If you're running TheMetaBot stack locally (or have access to a self-hosted
+deployment) and want to point this plugin at it instead of the public gateway:
 
 ```bash
 git clone https://github.com/oliver-pringle/acp-find-plugin
 cd acp-find-plugin
 # edit .mcp.json:
 #   "ACP_API_URL": "http://localhost:5000"
-#   "ACP_API_KEY": "<your INTERNAL_API_KEY from the bot's .env>"
+#   "ACP_API_KEY": "<your INTERNAL_API_KEY>"
 ```
 
 Then symlink or `cp -r` this directory into `~/.claude/plugins/` and restart Claude Code.
