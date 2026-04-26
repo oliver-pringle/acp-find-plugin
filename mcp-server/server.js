@@ -14,7 +14,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.1.1";
+const SERVER_VERSION = "0.1.3";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
@@ -34,7 +34,7 @@ const TOOLS = [
   {
     name: "acp_find",
     description:
-      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, and descriptions. Use for 'is there an agent that can do X' questions.",
+      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, and a reputation block. Use for 'is there an agent that can do X' questions. By default hides offerings that haven't been hired in 90 days; set includeStale=true to include them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -52,6 +52,10 @@ const TOOLS = [
         priceMaxUsdc: {
           type: "number",
           description: "Optional. Cap result prices to this max USDC value."
+        },
+        includeStale: {
+          type: "boolean",
+          description: "Set true to include offerings that have never been hired or whose hire count hasn't grown in 90 days. Default false (filter on)."
         }
       },
       required: ["query"]
@@ -80,6 +84,25 @@ const TOOLS = [
         }
       },
       required: ["useCase"]
+    }
+  },
+  {
+    name: "acp_agent_reputation",
+    description:
+      "Look up an ACP agent's reputation by wallet address. Returns a 0-100 score, percentile, total lifetime jobs, and a per-offering breakdown sorted by hires descending. Use to vet an agent before recommending them, to compare candidates returned by acp_find, or to answer 'is this agent legit?' questions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        },
+        offeringName: {
+          type: "string",
+          description: "Optional. Name of a specific offering owned by the agent. When supplied, the response narrows to a single per-offering reputation block."
+        }
+      },
+      required: ["agentAddress"]
     }
   }
 ];
@@ -119,7 +142,8 @@ async function dispatchTool(name, args) {
     return callGateway("/v1/search", {
       query: args.query,
       limit: args.limit ?? 5,
-      priceMaxUsdc: args.priceMaxUsdc
+      priceMaxUsdc: args.priceMaxUsdc,
+      staleAfterDays: args.includeStale ? 0 : 90
     });
   }
   if (name === "acp_compose_stack") {
@@ -128,6 +152,13 @@ async function dispatchTool(name, args) {
       useCase: args.useCase,
       budgetUsdc: args.budgetUsdc,
       maxOfferings: args.maxOfferings ?? 5
+    });
+  }
+  if (name === "acp_agent_reputation") {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    return callGateway("/v1/agentReputation", {
+      agentAddress: args.agentAddress,
+      offeringName: args.offeringName
     });
   }
   throw new Error(`Unknown tool: ${name}`);

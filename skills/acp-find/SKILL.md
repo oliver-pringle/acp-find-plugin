@@ -21,13 +21,17 @@ Activate when the user describes a need that could be served by an autonomous ag
 
 The bundled MCP server `acp-find` exposes:
 
-- **`acp_find`** — semantic search; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score).
+- **`acp_find`** — semantic search; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation).
   - Args: `query` (required), `limit` (default 5, max 50), `priceMaxUsdc` (optional cap).
   - Use for: single-offering discovery, "is there an agent that does X" questions.
 
 - **`acp_compose_stack`** — LLM-curated multi-agent stack for a stated use case.
   - Args: `useCase` (required), `budgetUsdc` (optional total cap), `maxOfferings` (default 5).
   - Use for: "I want to do X end-to-end", "give me a workflow", multi-step requirements.
+
+- **`acp_agent_reputation`** — direct reputation lookup for a single agent by wallet address.
+  - Args: `agentAddress` (required), `offeringName` (optional — narrows to one offering).
+  - Use for: vetting before hiring ("is this agent legit?"), comparing candidates after `acp_find`, or when the user pastes a wallet address and asks about it.
 
 ## How to respond
 
@@ -36,6 +40,10 @@ The bundled MCP server `acp-find` exposes:
 3. Return results as a markdown table or list with: agent name, offering name, price in USDC, one-line description, **reputation score** (when present).
 4. If a `bestMatch` field is set in the response (semantic score ≥ 0.7), highlight it as the recommended choice. Mention its reputation score in the callout if present (e.g. "score 0.85, reputation 87/100").
 5. Always include the agent's wallet address in the output so the user can hire the agent on https://app.virtuals.io or via an ACP buyer client.
+
+## Stale-offering filter
+
+`acp_find` defaults to hiding offerings that have either never been hired or whose hire count hasn't grown in 90 days — most of the marketplace's 30K+ listings are dead. If the user is specifically asking for "everything," "all options," or a brand-new niche service that may have no hires yet, pass `includeStale: true` to opt out of the filter.
 
 ## Reputation field
 
