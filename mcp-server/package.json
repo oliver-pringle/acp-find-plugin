@@ -1,6 +1,6 @@
 {
   "name": "acp-find-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server exposing acp_find and acp_compose_stack tools backed by the ACP_Metabot public gateway.",
   "type": "module",
   "main": "server.js",

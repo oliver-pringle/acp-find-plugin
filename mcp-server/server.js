@@ -14,8 +14,21 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.1";
 const PROTOCOL_VERSION = "2024-11-05";
+
+// Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
+// reason (Node wraps undici errors in a generic TypeError).
+function formatError(err) {
+  if (!err) return "Unknown error";
+  let msg = err.message || String(err);
+  let cause = err.cause;
+  while (cause) {
+    msg += ` → ${cause.message || cause.code || String(cause)}`;
+    cause = cause.cause;
+  }
+  return msg;
+}
 
 const TOOLS = [
   {
@@ -158,7 +171,7 @@ async function handleRequest(req) {
           id,
           result: {
             isError: true,
-            content: [{ type: "text", text: err?.message || String(err) }]
+            content: [{ type: "text", text: formatError(err) }]
           }
         });
       }
