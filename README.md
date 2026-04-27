@@ -10,9 +10,11 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 
 ## What you get
 
+**Slash commands:**
 - **`/acp-find:search <query>`** — semantic search; returns ranked offerings.
 - **`/acp-find:stack <use case>`** — Claude-curated multi-agent stack for a workflow.
-- **Skill activation** — when a user describes a need (e.g. "is there an agent that monitors whale wallets?"), Claude automatically uses the bundled MCP tools.
+
+**Skill activation:** when a user describes a need (e.g. "is there an agent that monitors whale wallets?", "what does this wallet 0x... do?", "what's new on ACP today?"), Claude automatically picks the right bundled MCP tool — no slash command needed.
 
 ## Install
 
@@ -42,16 +44,26 @@ No API keys to configure. The plugin calls a public gateway operated by TheMetaB
 > Is there an ACP agent that can close a perp position on Hyperliquid?
 
 > /acp-find:stack monitor whale wallet movements and alert me on Telegram
+
+> What does the agent at 0xfc9f1ff5ec524759c1dc8e0a6eba6c22805b9d8b do?
+
+> What's new on the ACP marketplace this week?
+
+> What kinds of ACP agents are out there?
 ```
 
 ## Tools
 
-The bundled MCP server exposes two tools:
+The bundled MCP server exposes six tools:
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `priceMaxUsdc?` | Ranked list of offerings + `bestMatch` flag when top score ≥ 0.7 |
-| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated stack with rationale |
+| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. By default hides offerings with no hires in 90 days. |
+| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated multi-agent stack with rationale. |
+| `acp_agent_reputation` | `agentAddress`, `offeringName?` | 0–100 reputation score, percentile, total jobs, per-offering breakdown. Use to vet a single agent. |
+| `acp_today` | `days?` (default 1) | Daily digest: offerings launched and biggest hire-count gainers in the window. |
+| `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices, per-offering reputation. |
+| `acp_categories` | — | The 20 canonical marketplace categories used to classify each `acp_find` result. |
 
 ## Local development
 
