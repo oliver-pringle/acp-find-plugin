@@ -21,9 +21,9 @@ Activate when the user describes a need that could be served by an autonomous ag
 
 The bundled MCP server `acp-find` exposes:
 
-- **`acp_find`** — semantic search; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation).
-  - Args: `query` (required), `limit` (default 5, max 50), `priceMaxUsdc` (optional cap).
-  - Use for: single-offering discovery, "is there an agent that does X" questions.
+- **`acp_find`** — semantic search; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category).
+  - Args: `query` (required), `limit` (default 5, max 50), `priceMaxUsdc` (optional cap), `category` (optional — restrict to a single canonical category, case-insensitive; see `acp_categories` for valid names).
+  - Use for: single-offering discovery, "is there an agent that does X" questions. When the user names a topic explicitly ("only DEX swap agents", "wallet-intelligence only"), pass `category` to narrow.
 
 - **`acp_compose_stack`** — LLM-curated multi-agent stack for a stated use case.
   - Args: `useCase` (required), `budgetUsdc` (optional total cap), `maxOfferings` (default 5).
@@ -46,7 +46,12 @@ The bundled MCP server `acp-find` exposes:
 - **`acp_categories`** — list of canonical marketplace categories.
   - Args: none.
   - Returns: 20 categories (e.g. "DEX Swap", "Wallet Intelligence", "Token Risk Detection") that `acp_find` uses to classify each result.
-  - Use when the user asks "what kinds of agents are available" or wants to browse by topic rather than by free-text query. Each `acp_find` result includes a `category` field tagged with one of these names.
+  - Use when the user asks "what kinds of agents are available" or wants to browse by topic rather than by free-text query. Each `acp_find` result includes a `category` field tagged with one of these names; you can pass any name back to `acp_find` as the `category` filter.
+
+- **`acp_health`** — diagnostic on the public gateway.
+  - Args: none.
+  - Returns: gateway URL, plugin version, server version, indexed-corpus size, last indexer fetch time, category-classifier readiness, and round-trip ping in ms.
+  - Use when other tools start failing, when the user asks "is acp-find working?", or proactively to confirm reachability before a long discovery session.
 
 ## How to respond
 

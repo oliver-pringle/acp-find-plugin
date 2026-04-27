@@ -14,7 +14,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.1.6";
+const SERVER_VERSION = "0.1.7";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
@@ -56,6 +56,10 @@ const TOOLS = [
         includeStale: {
           type: "boolean",
           description: "Set true to include offerings that have never been hired or whose hire count hasn't grown in 90 days. Default false (filter on)."
+        },
+        category: {
+          type: "string",
+          description: "Optional. Restrict results to a single canonical category (case-insensitive). Use acp_categories to list valid names — e.g. 'DEX Swap', 'Wallet Intelligence', 'Token Risk Detection'."
         }
       },
       required: ["query"]
@@ -141,6 +145,12 @@ const TOOLS = [
     description:
       "Returns the canonical list of marketplace categories used by acp_find's classification (e.g. 'DEX Swap', 'Wallet Intelligence', 'Token Risk Detection'). Use this when the user asks 'what kinds of agents are available' or when they want to browse the marketplace by topic rather than by query.",
     inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "acp_health",
+    description:
+      "Diagnostic check on the public ACP_Metabot gateway. Returns gateway URL, server version, indexed-corpus size, last indexer fetch time, and category-classifier readiness. Use when search/stack tools return errors, when the user asks 'is acp-find working?', or to confirm the gateway is reachable before a long session.",
+    inputSchema: { type: "object", properties: {} }
   }
 ];
 
@@ -180,7 +190,8 @@ async function dispatchTool(name, args) {
       query: args.query,
       limit: args.limit ?? 5,
       priceMaxUsdc: args.priceMaxUsdc,
-      staleAfterDays: args.includeStale ? 0 : 90
+      staleAfterDays: args.includeStale ? 0 : 90,
+      category: args.category
     });
   }
   if (name === "acp_compose_stack") {
@@ -208,6 +219,11 @@ async function dispatchTool(name, args) {
   }
   if (name === "acp_categories") {
     return callGateway("/v1/categories", undefined, "GET");
+  }
+  if (name === "acp_health") {
+    const startedAt = Date.now();
+    const body = await callGateway("/v1/health", undefined, "GET");
+    return { ...body, plugin: { version: SERVER_VERSION, gatewayUrl: API_URL, pingMs: Date.now() - startedAt } };
   }
   throw new Error(`Unknown tool: ${name}`);
 }

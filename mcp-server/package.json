@@ -1,7 +1,7 @@
 {
   "name": "acp-find-mcp-server",
-  "version": "0.1.6",
-  "description": "MCP server exposing acp_find, acp_compose_stack, acp_agent_reputation, acp_today, acp_browse_agent, and acp_categories tools backed by the ACP_Metabot public gateway.",
+  "version": "0.1.7",
+  "description": "MCP server exposing acp_find, acp_compose_stack, acp_agent_reputation, acp_today, acp_browse_agent, acp_categories, and acp_health tools backed by the ACP_Metabot public gateway.",
   "type": "module",
   "main": "server.js",
   "engines": {

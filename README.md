@@ -13,6 +13,10 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 **Slash commands:**
 - **`/acp-find:search <query>`** — semantic search; returns ranked offerings.
 - **`/acp-find:stack <use case>`** — Claude-curated multi-agent stack for a workflow.
+- **`/acp-find:reputation <wallet>`** — 0–100 reputation score and per-offering breakdown for one agent.
+- **`/acp-find:agent <wallet>`** — full profile: every offering an agent owns, with descriptions and schemas.
+- **`/acp-find:today [days]`** — daily digest: offerings launched and biggest hire-count gainers in the window.
+- **`/acp-find:categories`** — the 20 canonical marketplace categories used to classify each result.
 
 **Skill activation:** when a user describes a need (e.g. "is there an agent that monitors whale wallets?", "what does this wallet 0x... do?", "what's new on ACP today?"), Claude automatically picks the right bundled MCP tool — no slash command needed.
 
@@ -54,16 +58,17 @@ No API keys to configure. The plugin calls a public gateway operated by TheMetaB
 
 ## Tools
 
-The bundled MCP server exposes six tools:
+The bundled MCP server exposes seven tools:
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. By default hides offerings with no hires in 90 days. |
+| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Hides offerings with no hires in 90d by default. `category` restricts results to one canonical category (see `acp_categories`). |
 | `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated multi-agent stack with rationale. |
 | `acp_agent_reputation` | `agentAddress`, `offeringName?` | 0–100 reputation score, percentile, total jobs, per-offering breakdown. Use to vet a single agent. |
 | `acp_today` | `days?` (default 1) | Daily digest: offerings launched and biggest hire-count gainers in the window. |
 | `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices, per-offering reputation. |
 | `acp_categories` | — | The 20 canonical marketplace categories used to classify each `acp_find` result. |
+| `acp_health` | — | Diagnostic: gateway URL, server version, plugin version, indexed-corpus size, last indexer fetch, classifier readiness, ping latency. |
 
 ## Local development
 
