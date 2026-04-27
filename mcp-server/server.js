@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // MCP server for the acp-find plugin.
 //
 // Implements the Model Context Protocol over stdio with no npm dependencies —
@@ -14,7 +15,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.1.7";
+const SERVER_VERSION = "0.2.0";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS

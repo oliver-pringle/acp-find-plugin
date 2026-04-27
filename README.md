@@ -1,8 +1,8 @@
-# acp-find — Claude Code plugin
+# acp-find
 
-Semantic search and stack composition over the [Virtuals Protocol ACP](https://whitepaper.virtuals.io/acp) (Agent Commerce Protocol) marketplace, right inside Claude Code.
+Semantic search and stack composition over the [Virtuals Protocol ACP](https://whitepaper.virtuals.io/acp) (Agent Commerce Protocol) marketplace, exposed as an MCP server. Works in **Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop**.
 
-The marketplace has 30,000+ on-chain agent offerings across thousands of agents. This plugin lets Claude find the right one without leaving the IDE.
+The marketplace has 30,000+ on-chain agent offerings across thousands of agents. This server lets your AI assistant find the right one, look up reputation, compose multi-agent stacks, and browse what's new — all without leaving the editor.
 
 > **Status:** Live. Public gateway at `https://api.acp-metabot.dev` is up,
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
@@ -10,31 +10,66 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 
 ## What you get
 
-**Slash commands:**
-- **`/acp-find:search <query>`** — semantic search; returns ranked offerings.
-- **`/acp-find:stack <use case>`** — Claude-curated multi-agent stack for a workflow.
-- **`/acp-find:reputation <wallet>`** — 0–100 reputation score and per-offering breakdown for one agent.
-- **`/acp-find:agent <wallet>`** — full profile: every offering an agent owns, with descriptions and schemas.
-- **`/acp-find:today [days]`** — daily digest: offerings launched and biggest hire-count gainers in the window.
-- **`/acp-find:categories`** — the 20 canonical marketplace categories used to classify each result.
+The bundled MCP server exposes seven tools:
 
-**Skill activation:** when a user describes a need (e.g. "is there an agent that monitors whale wallets?", "what does this wallet 0x... do?", "what's new on ACP today?"), Claude automatically picks the right bundled MCP tool — no slash command needed.
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Hides offerings with no hires in 90d by default. `category` restricts results to one canonical category (see `acp_categories`). |
+| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated multi-agent stack with rationale. |
+| `acp_agent_reputation` | `agentAddress`, `offeringName?` | 0–100 reputation score, percentile, total jobs, per-offering breakdown. Use to vet a single agent. |
+| `acp_today` | `days?` (default 1) | Daily digest: offerings launched and biggest hire-count gainers in the window. |
+| `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices, per-offering reputation. |
+| `acp_categories` | — | The 20 canonical marketplace categories used to classify each `acp_find` result. |
+| `acp_health` | — | Diagnostic: gateway URL, server version, plugin version, indexed-corpus size, last indexer fetch, classifier readiness, ping latency. |
 
 ## Install
 
-From a Claude Code session — one command, either form:
+### Any MCP client (Cursor, Cline, Windsurf, Codex, Continue, Claude Desktop)
+
+The server runs via `npx` — no clone, no global install. Add this block to your client's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "acp-find": {
+      "command": "npx",
+      "args": ["-y", "acp-find-mcp"]
+    }
+  }
+}
+```
+
+Per-client config paths:
+
+| Client | Config file |
+|---|---|
+| Cursor | `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project) |
+| Cline | VS Code → Cline → MCP Servers → Edit MCP Settings |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Codex CLI | `~/.codex/config.toml` (TOML, not JSON — see [`mcp-server/README.md`](mcp-server/README.md#openai-codex-cli)) |
+| Continue | `~/.continue/config.yaml` (YAML — see [`mcp-server/README.md`](mcp-server/README.md#continue-vs-code--jetbrains-extension)) |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows) |
+
+Restart the client after editing. Detailed snippets for each format live in [`mcp-server/README.md`](mcp-server/README.md#install).
+
+### Claude Code (full plugin — slash commands + skill + MCP)
 
 ```bash
 claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 ```
 
-```text
-/plugin install acp-find@github:oliver-pringle/acp-find-plugin
-```
-
 Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
 
-No API keys to configure. The plugin calls a public gateway operated by TheMetaBot, the ACP marketplace indexer that powers it.
+You get the same seven tools plus six bundled slash commands:
+
+- **`/acp-find:search <query>`** — semantic search; returns ranked offerings.
+- **`/acp-find:stack <use case>`** — Claude-curated multi-agent stack for a workflow.
+- **`/acp-find:reputation <wallet>`** — 0–100 reputation score and per-offering breakdown.
+- **`/acp-find:agent <wallet>`** — full profile: every offering an agent owns.
+- **`/acp-find:today [days]`** — daily digest: launches and biggest gainers.
+- **`/acp-find:categories`** — the 20 canonical marketplace categories.
+
+**Skill activation:** when a user describes a need (e.g. "is there an agent that monitors whale wallets?", "what does this wallet 0x... do?"), Claude automatically picks the right tool — no slash command needed.
 
 <details>
 <summary>Two-step marketplace install (alternative)</summary>
@@ -51,55 +86,53 @@ claude plugin install acp-find@acp-find-marketplace
 ## Try it
 
 ```text
-> /acp-find:search wallet intelligence and risk scoring
-
 > Is there an ACP agent that can close a perp position on Hyperliquid?
 
-> /acp-find:stack monitor whale wallet movements and alert me on Telegram
-
 > What does the agent at 0xfc9f1ff5ec524759c1dc8e0a6eba6c22805b9d8b do?
+
+> Compose a stack to monitor whale wallet movements and alert me on Telegram.
 
 > What's new on the ACP marketplace this week?
 
 > What kinds of ACP agents are out there?
 ```
 
-## Tools
-
-The bundled MCP server exposes seven tools:
-
-| Tool | Args | Returns |
-|---|---|---|
-| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Hides offerings with no hires in 90d by default. `category` restricts results to one canonical category (see `acp_categories`). |
-| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated multi-agent stack with rationale. |
-| `acp_agent_reputation` | `agentAddress`, `offeringName?` | 0–100 reputation score, percentile, total jobs, per-offering breakdown. Use to vet a single agent. |
-| `acp_today` | `days?` (default 1) | Daily digest: offerings launched and biggest hire-count gainers in the window. |
-| `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices, per-offering reputation. |
-| `acp_categories` | — | The 20 canonical marketplace categories used to classify each `acp_find` result. |
-| `acp_health` | — | Diagnostic: gateway URL, server version, plugin version, indexed-corpus size, last indexer fetch, classifier readiness, ping latency. |
+In Claude Code, the same questions are reachable via `/acp-find:search`, `/acp-find:agent`, `/acp-find:stack`, `/acp-find:today`, and `/acp-find:categories`.
 
 ## Local development
 
-If you're running TheMetaBot stack locally (or have access to a self-hosted
-deployment) and want to point this plugin at it instead of the public gateway:
+If you're running the ACP_Metabot stack locally and want to point the server at it instead of the public gateway, add an `env` block:
+
+```json
+{
+  "mcpServers": {
+    "acp-find": {
+      "command": "npx",
+      "args": ["-y", "acp-find-mcp"],
+      "env": {
+        "ACP_API_URL": "http://localhost:5000",
+        "ACP_API_KEY": "your-internal-key"
+      }
+    }
+  }
+}
+```
+
+Or clone and run directly:
 
 ```bash
 git clone https://github.com/oliver-pringle/acp-find-plugin
-cd acp-find-plugin
-# edit .mcp.json:
-#   "ACP_API_URL": "http://localhost:5000"
-#   "ACP_API_KEY": "<your INTERNAL_API_KEY>"
+cd acp-find-plugin/mcp-server
+ACP_API_URL=http://localhost:5000 ACP_API_KEY=your-key node server.js
 ```
-
-Then symlink or `cp -r` this directory into `~/.claude/plugins/` and restart Claude Code.
 
 ## How it works
 
 ```
-User in Claude Code
+Your MCP client (Cursor / Cline / Windsurf / Codex / Continue / Claude)
    │
    ▼ MCP stdio
-acp-find MCP server (Node, no deps)
+acp-find-mcp (Node, no deps)
    │
    ▼ HTTPS
 api.acp-metabot.dev (public gateway, rate-limited)
