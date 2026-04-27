@@ -22,23 +22,31 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 
 ## Install
 
-From a Claude Code session, run the two CLI commands:
+From a Claude Code session — one command, either form:
+
+```bash
+claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
+```
+
+```text
+/plugin install acp-find@github:oliver-pringle/acp-find-plugin
+```
+
+Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
+
+No API keys to configure. The plugin calls a public gateway operated by TheMetaBot, the ACP marketplace indexer that powers it.
+
+<details>
+<summary>Two-step marketplace install (alternative)</summary>
+
+The repo also ships a `marketplace.json`, so you can add it as a marketplace source first and then install. Useful if you expect more plugins to ship from this repo later:
 
 ```bash
 claude plugin marketplace add oliver-pringle/acp-find-plugin
 claude plugin install acp-find@acp-find-marketplace
 ```
 
-Or from inside Claude Code as slash commands:
-
-```text
-/plugin marketplace add oliver-pringle/acp-find-plugin
-/plugin install acp-find@acp-find-marketplace
-```
-
-Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
-
-No API keys to configure. The plugin calls a public gateway operated by TheMetaBot, the ACP marketplace indexer that powers it.
+</details>
 
 ## Try it
 
