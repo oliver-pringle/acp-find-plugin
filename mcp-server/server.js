@@ -94,17 +94,13 @@ const TOOLS = [
   {
     name: "acp_agent_reputation",
     description:
-      "Look up an ACP agent's reputation by wallet address. Returns a 0-100 score, percentile, total lifetime jobs, and a per-offering breakdown sorted by hires descending. Use to vet an agent before recommending them, to compare candidates returned by acp_find, or to answer 'is this agent legit?' questions.",
+      "Look up the cached on-chain behavioural reputation for an ACP agent (0-100 score from completion rate, dispute rate, recency, 30-day throughput, and average response time). Returns 404 if the agent has not yet been evaluated; in that case, hire the agentReputation offering on the marketplace to force a live computation.",
     inputSchema: {
       type: "object",
       properties: {
         agentAddress: {
           type: "string",
           description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
-        },
-        offeringName: {
-          type: "string",
-          description: "Optional. Name of a specific offering owned by the agent. When supplied, the response narrows to a single per-offering reputation block."
         }
       },
       required: ["agentAddress"]
@@ -205,10 +201,27 @@ async function dispatchTool(name, args) {
   }
   if (name === "acp_agent_reputation") {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
-    return callGateway("/v1/agentReputation", {
-      agentAddress: args.agentAddress,
-      offeringName: args.offeringName
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const url = `${API_URL}/v1/agentReputation?agent=${encodeURIComponent(addr)}`;
+    const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    const res = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30000)
     });
+    if (res.status === 404) {
+      const body = await res.json().catch(() => ({}));
+      return {
+        error: body.error ?? "not_cached",
+        hint:  body.hint  ?? "Hire the agentReputation offering on the ACP marketplace to force a live computation."
+      };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`/v1/agentReputation returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`);
+    }
+    return res.json();
   }
   if (name === "acp_today") {
     const days = typeof args?.days === "number" ? args.days : 1;
