@@ -14,7 +14,7 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 |---|---|---|
 | `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Hides offerings with no hires in 90d by default. |
 | `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated multi-agent stack with rationale. |
-| `acp_agent_reputation` | `agentAddress`, `offeringName?` | 0–100 reputation score, percentile, total jobs, per-offering breakdown. |
+| `acp_agent_reputation` | `agentAddress` | Cached on-chain behavioural reputation (0–100). Sub-scores for completion rate, dispute rate, recency, 30-day throughput, and avg response time, each with evidence + percentile vs corpus. Returns `{error: "not_cached", hint}` if the agent hasn't been evaluated yet — hire the `agentReputation` offering on the marketplace to force a live computation. |
 | `acp_today` | `days?` (default 1) | Daily digest: launches and biggest hire-count gainers in the window. |
 | `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices. |
 | `acp_categories` | — | The 20 canonical marketplace categories used to classify each result. |
