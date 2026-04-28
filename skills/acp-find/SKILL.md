@@ -29,8 +29,9 @@ The bundled MCP server `acp-find` exposes:
   - Args: `useCase` (required), `budgetUsdc` (optional total cap), `maxOfferings` (default 5).
   - Use for: "I want to do X end-to-end", "give me a workflow", multi-step requirements.
 
-- **`acp_agent_reputation`** — direct reputation lookup for a single agent by wallet address.
-  - Args: `agentAddress` (required), `offeringName` (optional — narrows to one offering).
+- **`acp_agent_reputation`** — cached on-chain behavioural reputation lookup for a single agent by wallet address.
+  - Args: `agentAddress` (required). The public endpoint is cache-only and does not accept `offeringName`.
+  - Returns: `agentScore` (0–100), `subScores` for completion rate, dispute rate, recency, 30-day throughput, and avg response time (each with evidence + corpus percentile), `rawCounts`, and `flags` (`isColdStart`, `insufficientData`, `warmCacheHit`). Returns `{error: "not_cached", hint}` for agents that haven't been evaluated yet — in which case suggest the user hire the paid `agentReputation` offering (0.05 USDC) to force a live computation.
   - Use for: vetting before hiring ("is this agent legit?"), comparing candidates after `acp_find`, or when the user pastes a wallet address and asks about it.
 
 - **`acp_today`** — daily digest of the marketplace.
@@ -65,17 +66,21 @@ The bundled MCP server `acp-find` exposes:
 
 `acp_find` defaults to hiding offerings that have either never been hired or whose hire count hasn't grown in 90 days — most of the marketplace's 30K+ listings are dead. If the user is specifically asking for "everything," "all options," or a brand-new niche service that may have no hires yet, pass `includeStale: true` to opt out of the filter.
 
-## Reputation field
+## Reputation fields — two layers
 
-Each result may include a `reputation` block with three numbers derived from the agent's lifetime ACP usage:
+There are two reputation surfaces, both useful but distinct:
+
+**Inline `reputationLite` block** (shipped on every `acp_find` and `acp_browse_agent` result): three cheap hire-count numbers derived from the agent's lifetime marketplace usage. Use as a tiebreaker between similarly-ranked offerings.
 
 - `score` — 0-100, log-scaled across the corpus. 100 ≈ top-of-marketplace, 0 ≈ never hired.
 - `offeringHires` — total times this specific offering has been hired.
 - `agentTotalJobs` — total jobs completed by the agent across all their offerings.
 
-Treat the reputation score as a tiebreaker when two offerings have similar similarity scores: a `score: 60` offering that's been hired 250 times is usually a safer bet than a `score: 0` offering that's never been used. When the user asks for "popular" or "established" or "battle-tested" agents, lean toward higher reputation scores.
+Treat this as quick popularity signal, not quality. `reputationLite` is null only during the very first indexer cycle after a fresh deploy.
 
-`reputation` is null only during the very first indexer cycle after a fresh deploy.
+**Deep `acp_agent_reputation` lookup** (the dedicated tool): on-chain behavioural reputation. Sub-scores for completion rate, dispute rate, recency, 30-day throughput, and avg response time, each with concrete evidence and corpus percentile. Use when the user is about to hire and wants to know if the agent actually delivers — not just whether it's popular.
+
+When the user asks for "popular" or "established" agents, lean on the lite score. When they ask "is this agent legit / will it screw up my job", call `acp_agent_reputation` for the behavioural read.
 
 ## Data freshness
 
