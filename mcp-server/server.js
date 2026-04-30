@@ -15,7 +15,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.3.0";
+const SERVER_VERSION = "0.4.0";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
@@ -35,7 +35,7 @@ const TOOLS = [
   {
     name: "acp_find",
     description:
-      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, and a reputation block. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category. Use for 'is there an agent that can do X' questions.",
+      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, a `marketplaceVersion` (`v1` | `v2`), and a reputation block. Searches V1 + V2 marketplaces in one call by default. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category, marketplace. Use for 'is there an agent that can do X' questions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -78,6 +78,11 @@ const TOOLS = [
           description: "Optional. Keep only offerings whose hire count has grown within the last N days (1-365). Cleaner numeric alternative to includeStale.",
           minimum: 1,
           maximum: 365
+        },
+        marketplace: {
+          type: "string",
+          enum: ["v1", "v2"],
+          description: "Optional. Restrict results to one ACP marketplace. Default = both V1 and V2 (recommended; V2 is the new generation of agents). Pass 'v1' to search only the legacy V1 corpus, or 'v2' to search only V2 agents."
         }
       },
       required: ["query"]
@@ -86,7 +91,7 @@ const TOOLS = [
   {
     name: "acp_compose_stack",
     description:
-      "LLM-curated multi-agent ACP stack for a stated use case. Returns an ordered list of offerings with a rationale describing how they compose. Use for multi-step workflows.",
+      "LLM-curated multi-agent ACP stack for a stated use case. Returns an ordered list of offerings (each tagged with `marketplaceVersion`) plus a rationale describing how they compose. Searches V1 + V2 marketplaces by default. Use for multi-step workflows.",
     inputSchema: {
       type: "object",
       properties: {
@@ -103,6 +108,11 @@ const TOOLS = [
           description: "Max offerings to include in the stack (1-10). Default 5.",
           minimum: 1,
           maximum: 10
+        },
+        marketplace: {
+          type: "string",
+          enum: ["v1", "v2"],
+          description: "Optional. Restrict candidates to one ACP marketplace. Default = both. Pass 'v2' for stacks that should only use V2 agents."
         }
       },
       required: ["useCase"]
@@ -147,7 +157,7 @@ const TOOLS = [
   {
     name: "acp_today",
     description:
-      "Daily digest of the ACP marketplace. Returns offerings launched in the last N days plus the biggest hire-count gainers (when comparison data is available). Use for 'what's new on ACP', 'show me what just launched', 'what's trending'.",
+      "Daily digest of the ACP marketplace. Returns offerings launched in the last N days plus the biggest hire-count gainers (when comparison data is available). Each result is tagged with `marketplaceVersion` (`v1` | `v2`). Spans both marketplaces by default. Use for 'what's new on ACP', 'show me what just launched', 'what's trending'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -156,6 +166,11 @@ const TOOLS = [
           description: "Lookback window in days (1-30). Default 1 (last 24h).",
           minimum: 1,
           maximum: 30
+        },
+        marketplace: {
+          type: "string",
+          enum: ["v1", "v2"],
+          description: "Optional. Restrict the digest to one ACP marketplace. Default = both."
         }
       }
     }
@@ -218,6 +233,16 @@ async function callGateway(path, body, method = "POST") {
   return res.json();
 }
 
+// Normalise an incoming marketplace arg from the caller. Returns "v1", "v2",
+// or undefined (which the gateway treats as "search both"). Anything else
+// silently drops to undefined — the gateway's 400 handler will catch a stray
+// value if the caller insists on round-tripping it.
+function normalizeMarketplace(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw).trim().toLowerCase();
+  return (s === "v1" || s === "v2") ? s : undefined;
+}
+
 async function dispatchTool(name, args) {
   if (name === "acp_find") {
     if (!args?.query) throw new Error("query is required");
@@ -232,7 +257,8 @@ async function dispatchTool(name, args) {
       category: args.category,
       chain: Array.isArray(args.chain) ? args.chain : undefined,
       minReputation: typeof args.minReputation === "number" ? args.minReputation : undefined,
-      freshness: typeof args.freshness === "number" ? args.freshness : undefined
+      freshness: typeof args.freshness === "number" ? args.freshness : undefined,
+      marketplace: normalizeMarketplace(args.marketplace)
     });
   }
   if (name === "acp_compose_stack") {
@@ -240,7 +266,8 @@ async function dispatchTool(name, args) {
     return callGateway("/v1/composeStack", {
       useCase: args.useCase,
       budgetUsdc: args.budgetUsdc,
-      maxOfferings: args.maxOfferings ?? 5
+      maxOfferings: args.maxOfferings ?? 5,
+      marketplace: normalizeMarketplace(args.marketplace)
     });
   }
   if (name === "acp_agent_reputation") {
@@ -279,7 +306,11 @@ async function dispatchTool(name, args) {
   }
   if (name === "acp_today") {
     const days = typeof args?.days === "number" ? args.days : 1;
-    return callGateway(`/v1/digest?days=${encodeURIComponent(days)}`, undefined, "GET");
+    const mp = normalizeMarketplace(args?.marketplace);
+    const path = mp
+      ? `/v1/digest?days=${encodeURIComponent(days)}&marketplace=${encodeURIComponent(mp)}`
+      : `/v1/digest?days=${encodeURIComponent(days)}`;
+    return callGateway(path, undefined, "GET");
   }
   if (name === "acp_browse_agent") {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
