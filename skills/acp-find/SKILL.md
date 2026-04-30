@@ -5,7 +5,7 @@ description: Use when the user wants to discover on-chain AI agents, offerings, 
 
 # ACP Find
 
-This skill activates when the user is hunting for **on-chain AI agents** or **services** on the Virtuals Protocol ACP marketplace. The marketplace currently has 30,000+ offerings across thousands of agents, and pre-indexed semantic search makes finding the right one trivial.
+This skill activates when the user is hunting for **on-chain AI agents** or **services** on the Virtuals Protocol ACP marketplace. The skill searches **both ACP V1 and ACP V2** marketplaces in a single call; every result carries a `marketplaceVersion` field so callers can tell them apart. By default both are returned; pass `marketplace: "v1"` or `"v2"` on `acp_find`, `acp_today`, or `acp_compose_stack` to scope to just one. The combined corpus is 30,000+ offerings across thousands of agents on Base / Base Sepolia.
 
 ## When to use
 
@@ -21,12 +21,12 @@ Activate when the user describes a need that could be served by an autonomous ag
 
 The bundled MCP server `acp-find` exposes:
 
-- **`acp_find`** — hybrid lexical + semantic search; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category). Combines BM25 over offering name/description with cosine over Voyage embeddings via Reciprocal Rank Fusion, so rare-keyword queries (contract addresses, tickers like `cbBTC`, niche jargon like `re-staking`) work alongside semantic ones.
-  - Args: `query` (required), `limit` (default 5, max 50), `priceMaxUsdc` (optional cap), `category` (optional — restrict to a single canonical category, case-insensitive; see `acp_categories` for valid names), `chain` (optional array of chain ids e.g. `["base"]`), `minReputation` (optional 0-100 floor; agents not yet evaluated pass through), `freshness` (optional days — keep only offerings whose hire count grew within the last N days; cleaner numeric replacement for the legacy `includeStale` boolean).
-  - Use for: single-offering discovery, "is there an agent that does X" questions. When the user names a topic explicitly ("only DEX swap agents"), pass `category`. When they hint at a chain ("on Base", "Hyperliquid"), pass `chain`. When they say "top-rated" / "established" / "reputable", pass `minReputation`. When they say "recently active" / "still alive", pass `freshness`.
+- **`acp_find`** — hybrid lexical + semantic search across **both V1 and V2 ACP marketplaces by default**; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category, **`marketplaceVersion`** = `v1` or `v2`). Combines BM25 over offering name/description with cosine over Voyage embeddings via Reciprocal Rank Fusion, so rare-keyword queries (contract addresses, tickers like `cbBTC`, niche jargon like `re-staking`) work alongside semantic ones.
+  - Args: `query` (required), `limit` (default 5, max 50), `priceMaxUsdc` (optional cap), `category` (optional — restrict to a single canonical category, case-insensitive; see `acp_categories` for valid names), `chain` (optional array of chain ids e.g. `["base"]`), `minReputation` (optional 0-100 floor; agents not yet evaluated pass through), `freshness` (optional days — keep only offerings whose hire count grew within the last N days; cleaner numeric replacement for the legacy `includeStale` boolean), `marketplace` (optional `"v1"` or `"v2"` — restrict to one ACP marketplace; default = both).
+  - Use for: single-offering discovery, "is there an agent that does X" questions. When the user names a topic explicitly ("only DEX swap agents"), pass `category`. When they hint at a chain ("on Base", "Hyperliquid"), pass `chain`. When they say "top-rated" / "established" / "reputable", pass `minReputation`. When they say "recently active" / "still alive", pass `freshness`. When they explicitly say "ACP V2 only" / "the new marketplace" / "V1 legacy agents", pass `marketplace`.
 
-- **`acp_compose_stack`** — LLM-curated multi-agent stack for a stated use case.
-  - Args: `useCase` (required), `budgetUsdc` (optional total cap), `maxOfferings` (default 5).
+- **`acp_compose_stack`** — LLM-curated multi-agent stack for a stated use case. Candidate pool spans both V1 and V2 by default; each result tagged with `marketplaceVersion`.
+  - Args: `useCase` (required), `budgetUsdc` (optional total cap), `maxOfferings` (default 5), `marketplace` (optional — restrict candidates to one ACP marketplace).
   - Use for: "I want to do X end-to-end", "give me a workflow", multi-step requirements.
 
 - **`acp_agent_reputation`** — cached on-chain behavioural reputation lookup for a single agent by wallet address.
@@ -39,9 +39,9 @@ The bundled MCP server `acp-find` exposes:
   - Returns: `{ agentAddress, days, history: [{ date, agentScore, subScores }, ...] }` oldest → newest.
   - Use when the user wants a longer trend than the inline 30-day trajectory on `acp_agent_reputation`, or specifically asks "is this agent getting better/worse over time" / "show me their last 90 days". Empty history means the agent hasn't been computed yet by the daily warmer or a paid hire — suggest hiring the `agentReputation` offering once to seed history.
 
-- **`acp_today`** — daily digest of the marketplace.
-  - Args: `days` (optional, default 1, max 30) — lookback window in days.
-  - Returns: `newOfferings` (just-launched), `gainers` (biggest hire-count growth in the window), and a `snapshotComparison` flag indicating whether comparison data is available yet.
+- **`acp_today`** — daily digest of the marketplace, spanning V1 + V2 by default.
+  - Args: `days` (optional, default 1, max 30) — lookback window in days. `marketplace` (optional `"v1"` or `"v2"`) — restrict the digest to one ACP marketplace.
+  - Returns: `newOfferings` (just-launched, each with `marketplaceVersion`), `gainers` (biggest hire-count growth in the window, each with `marketplaceVersion`), and a `snapshotComparison` flag indicating whether comparison data is available yet.
   - Use for: "what's new on ACP", "trending ACP agents", "what just launched". On a brand-new deploy the gainers list may be empty until at least 2 days of snapshots have accumulated; the response's `snapshotComparison: "insufficient_history"` signals this.
 
 - **`acp_browse_agent`** — full agent profile by wallet address.

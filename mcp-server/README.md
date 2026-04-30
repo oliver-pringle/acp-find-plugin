@@ -2,7 +2,7 @@
 
 MCP server for searching the [Virtuals Protocol ACP](https://whitepaper.virtuals.io/acp) (Agent Commerce Protocol) marketplace from any MCP-capable client — Cursor, Cline, Windsurf, Codex, Continue, Claude Code, Claude Desktop, and others.
 
-The marketplace has 30,000+ on-chain agent offerings across thousands of agents. This server lets your AI assistant find the right one (and look up reputation, compose multi-agent stacks, browse what's new) without leaving the editor.
+The marketplace has ~30,000+ on-chain agent offerings across thousands of agents, spanning both **ACP V1** (legacy) and **ACP V2** (the new generation). This server lets your AI assistant find the right one across both versions (and look up reputation, compose multi-agent stacks, browse what's new) without leaving the editor.
 
 > **Status:** Live. Public gateway at `https://api.acp-metabot.dev` is up,
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
@@ -12,12 +12,12 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Hybrid BM25 + dense fusion catches rare-keyword queries (contract addresses, tickers, niche jargon) alongside semantic ones. Hides offerings with no hires in 90d by default. New filters: `chain` (e.g. `["base","base-sepolia"]`), `minReputation` (0-100, agents not yet evaluated pass through), `freshness` (numeric replacement for `includeStale`). |
-| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated multi-agent stack with rationale. |
+| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Each result carries a `marketplaceVersion` field (`"v1"` or `"v2"`) so callers can render a version badge. Hybrid BM25 + dense fusion catches rare-keyword queries (contract addresses, tickers, niche jargon) alongside semantic ones. Hides offerings with no hires in 90d by default. Filters: `chain` (e.g. `["base","base-sepolia"]`), `minReputation` (0-100, agents not yet evaluated pass through), `freshness` (numeric replacement for `includeStale`), `marketplace` (`"v1"` or `"v2"`) restricts to one ACP marketplace — omit for cross-version (default). |
+| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?`, `marketplace?` | Curated multi-agent stack with rationale. `marketplace` (`"v1"` or `"v2"`) restricts the candidate pool to one ACP marketplace; omit for cross-version. |
 | `acp_agent_reputation` | `agentAddress` | Cached on-chain behavioural reputation (0–100). Sub-scores for completion rate, dispute rate, recency, 30-day throughput, and avg response time, each with evidence + percentile vs corpus. Returns the latest score plus a 30-day daily trajectory so you can see whether the agent is improving or declining. Returns `{error: "not_cached", hint}` if the agent hasn't been evaluated yet — hire the `agentReputation` offering on the marketplace to force a live computation. |
 | `acp_agent_reputation_history` | `agentAddress`, `days?` (1-90, default 30) | Day-by-day reputation trajectory over up to 90 days. Use after `acp_agent_reputation` when you need a longer trend than the inline 30-day snapshot. |
-| `acp_today` | `days?` (default 1) | Daily digest: launches and biggest hire-count gainers in the window. |
-| `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices. |
+| `acp_today` | `days?` (default 1), `marketplace?` | Daily digest: launches and biggest hire-count gainers in the window. `marketplace` (`"v1"` or `"v2"`) restricts to one ACP marketplace; omit for cross-version. |
+| `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices. Each offering carries `marketplaceVersion` (`"v1"` or `"v2"`). |
 | `acp_categories` | — | The 20 canonical marketplace categories used to classify each result. |
 | `acp_health` | — | Diagnostic: gateway URL, server version, indexed-corpus size, last fetch, ping latency. |
 
@@ -152,7 +152,7 @@ ACP_Metabot indexer + Voyage embeddings + Claude composer
    ▼ SQLite vector index of every ACP marketplace offering
 ```
 
-The index refreshes every 10 min from `https://acpx.virtuals.io/`. Results track live marketplace state within ~10 min.
+The index refreshes every 10 min from both **ACP V1** (`https://acpx.virtuals.io/`) and **ACP V2** (`https://api.acp.virtuals.io`). Results track live marketplace state across both versions within ~10 min.
 
 ## Requirements
 
