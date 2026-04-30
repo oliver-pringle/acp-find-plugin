@@ -15,7 +15,7 @@ import { createInterface } from "node:readline";
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const SERVER_NAME = "acp-find";
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 const PROTOCOL_VERSION = "2024-11-05";
 
 // Walk Error.cause chain so a "fetch failed" surfaces its real DNS/connect/TLS
@@ -35,7 +35,7 @@ const TOOLS = [
   {
     name: "acp_find",
     description:
-      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, and a reputation block. Use for 'is there an agent that can do X' questions. By default hides offerings that haven't been hired in 90 days; set includeStale=true to include them.",
+      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, and a reputation block. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category. Use for 'is there an agent that can do X' questions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -56,11 +56,28 @@ const TOOLS = [
         },
         includeStale: {
           type: "boolean",
-          description: "Set true to include offerings that have never been hired or whose hire count hasn't grown in 90 days. Default false (filter on)."
+          description: "Set true to include offerings that have never been hired or whose hire count hasn't grown in 90 days. Default false (filter on). Superseded by `freshness` when both are passed."
         },
         category: {
           type: "string",
           description: "Optional. Restrict results to a single canonical category (case-insensitive). Use acp_categories to list valid names — e.g. 'DEX Swap', 'Wallet Intelligence', 'Token Risk Detection'."
+        },
+        chain: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional. Restrict results to one or more chain ids (e.g. [\"base\",\"base-sepolia\"]). Case-insensitive; up to 8 entries."
+        },
+        minReputation: {
+          type: "number",
+          description: "Optional. Filter to agents whose cached on-chain reputation score is at least this value (0-100). Agents not yet evaluated pass through (unindexed != bad).",
+          minimum: 0,
+          maximum: 100
+        },
+        freshness: {
+          type: "number",
+          description: "Optional. Keep only offerings whose hire count has grown within the last N days (1-365). Cleaner numeric alternative to includeStale.",
+          minimum: 1,
+          maximum: 365
         }
       },
       required: ["query"]
@@ -94,13 +111,34 @@ const TOOLS = [
   {
     name: "acp_agent_reputation",
     description:
-      "Look up the cached on-chain behavioural reputation for an ACP agent (0-100 score from completion rate, dispute rate, recency, 30-day throughput, and average response time). Returns 404 if the agent has not yet been evaluated; in that case, hire the agentReputation offering on the marketplace to force a live computation.",
+      "Look up the cached on-chain behavioural reputation for an ACP agent (0-100 score from completion rate, dispute rate, recency, 30-day throughput, and average response time). Returns the latest score plus a 30-day daily trajectory so you can see whether the agent is improving or declining. Returns 404 if the agent has not yet been evaluated; in that case, hire the agentReputation offering on the marketplace to force a live computation.",
     inputSchema: {
       type: "object",
       properties: {
         agentAddress: {
           type: "string",
           description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        }
+      },
+      required: ["agentAddress"]
+    }
+  },
+  {
+    name: "acp_agent_reputation_history",
+    description:
+      "Day-by-day on-chain reputation trajectory for an ACP agent (up to 90 days). Each row is a UTC date plus that day's agentScore and per-sub-score breakdown. Use to spot improving or declining agents over time, or after acp_agent_reputation when the user wants the full longer-term trend rather than the inline 30-day snapshot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        },
+        days: {
+          type: "number",
+          description: "Lookback window in days (1-90). Default 30.",
+          minimum: 1,
+          maximum: 90
         }
       },
       required: ["agentAddress"]
@@ -183,12 +221,18 @@ async function callGateway(path, body, method = "POST") {
 async function dispatchTool(name, args) {
   if (name === "acp_find") {
     if (!args?.query) throw new Error("query is required");
+    // staleAfterDays preserves the legacy includeStale semantics; the C# tier
+    // prefers `freshness` when both are present, so callers passing both get
+    // the explicit number.
     return callGateway("/v1/search", {
       query: args.query,
       limit: args.limit ?? 5,
       priceMaxUsdc: args.priceMaxUsdc,
       staleAfterDays: args.includeStale ? 0 : 90,
-      category: args.category
+      category: args.category,
+      chain: Array.isArray(args.chain) ? args.chain : undefined,
+      minReputation: typeof args.minReputation === "number" ? args.minReputation : undefined,
+      freshness: typeof args.freshness === "number" ? args.freshness : undefined
     });
   }
   if (name === "acp_compose_stack") {
@@ -222,6 +266,16 @@ async function dispatchTool(name, args) {
       throw new Error(`/v1/agentReputation returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`);
     }
     return res.json();
+  }
+  if (name === "acp_agent_reputation_history") {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const days = typeof args.days === "number" ? args.days : 30;
+    return callGateway(
+      `/v1/agentReputationHistory?agent=${encodeURIComponent(addr)}&days=${encodeURIComponent(days)}`,
+      undefined,
+      "GET"
+    );
   }
   if (name === "acp_today") {
     const days = typeof args?.days === "number" ? args.days : 1;

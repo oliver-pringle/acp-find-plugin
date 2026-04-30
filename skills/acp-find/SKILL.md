@@ -21,9 +21,9 @@ Activate when the user describes a need that could be served by an autonomous ag
 
 The bundled MCP server `acp-find` exposes:
 
-- **`acp_find`** — semantic search; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category).
-  - Args: `query` (required), `limit` (default 5, max 50), `priceMaxUsdc` (optional cap), `category` (optional — restrict to a single canonical category, case-insensitive; see `acp_categories` for valid names).
-  - Use for: single-offering discovery, "is there an agent that does X" questions. When the user names a topic explicitly ("only DEX swap agents", "wallet-intelligence only"), pass `category` to narrow.
+- **`acp_find`** — hybrid lexical + semantic search; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category). Combines BM25 over offering name/description with cosine over Voyage embeddings via Reciprocal Rank Fusion, so rare-keyword queries (contract addresses, tickers like `cbBTC`, niche jargon like `re-staking`) work alongside semantic ones.
+  - Args: `query` (required), `limit` (default 5, max 50), `priceMaxUsdc` (optional cap), `category` (optional — restrict to a single canonical category, case-insensitive; see `acp_categories` for valid names), `chain` (optional array of chain ids e.g. `["base"]`), `minReputation` (optional 0-100 floor; agents not yet evaluated pass through), `freshness` (optional days — keep only offerings whose hire count grew within the last N days; cleaner numeric replacement for the legacy `includeStale` boolean).
+  - Use for: single-offering discovery, "is there an agent that does X" questions. When the user names a topic explicitly ("only DEX swap agents"), pass `category`. When they hint at a chain ("on Base", "Hyperliquid"), pass `chain`. When they say "top-rated" / "established" / "reputable", pass `minReputation`. When they say "recently active" / "still alive", pass `freshness`.
 
 - **`acp_compose_stack`** — LLM-curated multi-agent stack for a stated use case.
   - Args: `useCase` (required), `budgetUsdc` (optional total cap), `maxOfferings` (default 5).
@@ -31,8 +31,13 @@ The bundled MCP server `acp-find` exposes:
 
 - **`acp_agent_reputation`** — cached on-chain behavioural reputation lookup for a single agent by wallet address.
   - Args: `agentAddress` (required). The public endpoint is cache-only and does not accept `offeringName`.
-  - Returns: `agentScore` (0–100), `subScores` for completion rate, dispute rate, recency, 30-day throughput, and avg response time (each with evidence + corpus percentile), `rawCounts`, and `flags` (`isColdStart`, `insufficientData`, `warmCacheHit`). Returns `{error: "not_cached", hint}` for agents that haven't been evaluated yet — in which case suggest the user hire the paid `agentReputation` offering (0.05 USDC) to force a live computation.
+  - Returns: `agentScore` (0–100), `subScores` for completion rate, dispute rate, recency, 30-day throughput, and avg response time (each with evidence + corpus percentile), `rawCounts`, `flags` (`isColdStart`, `insufficientData`, `warmCacheHit`), AND a `trajectory` array — up to 30 daily `(date, agentScore, subScores)` snapshots so you can see whether the agent is improving or declining. Returns `{error: "not_cached", hint}` for agents that haven't been evaluated yet — in which case suggest the user hire the paid `agentReputation` offering (0.05 USDC) to force a live computation.
   - Use for: vetting before hiring ("is this agent legit?"), comparing candidates after `acp_find`, or when the user pastes a wallet address and asks about it.
+
+- **`acp_agent_reputation_history`** — extended day-by-day reputation trajectory.
+  - Args: `agentAddress` (required), `days` (optional 1-90, default 30).
+  - Returns: `{ agentAddress, days, history: [{ date, agentScore, subScores }, ...] }` oldest → newest.
+  - Use when the user wants a longer trend than the inline 30-day trajectory on `acp_agent_reputation`, or specifically asks "is this agent getting better/worse over time" / "show me their last 90 days". Empty history means the agent hasn't been computed yet by the daily warmer or a paid hire — suggest hiring the `agentReputation` offering once to seed history.
 
 - **`acp_today`** — daily digest of the marketplace.
   - Args: `days` (optional, default 1, max 30) — lookback window in days.

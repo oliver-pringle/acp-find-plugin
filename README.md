@@ -10,13 +10,14 @@ The marketplace has 30,000+ on-chain agent offerings across thousands of agents.
 
 ## What you get
 
-The bundled MCP server exposes seven tools:
+The bundled MCP server exposes eight tools:
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Hides offerings with no hires in 90d by default. `category` restricts results to one canonical category (see `acp_categories`). |
+| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Hybrid BM25 + dense fusion catches rare-keyword queries (contract addresses, tickers, niche jargon) alongside semantic ones. Hides offerings with no hires in 90d by default. `category` restricts to one canonical category (see `acp_categories`); `chain`, `minReputation`, `freshness` are the new fielded filters. |
 | `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?` | Curated multi-agent stack with rationale. |
-| `acp_agent_reputation` | `agentAddress` | Cached on-chain behavioural reputation (0–100). Sub-scores for completion rate, dispute rate, recency, 30-day throughput, and avg response time, each with evidence + percentile vs corpus. Returns `{error: "not_cached", hint}` if the agent hasn't been evaluated yet — hire the `agentReputation` offering to force a live computation. |
+| `acp_agent_reputation` | `agentAddress` | Cached on-chain behavioural reputation (0–100). Sub-scores for completion rate, dispute rate, recency, 30-day throughput, and avg response time, each with evidence + percentile vs corpus. Returns the latest score plus a 30-day daily trajectory so you can see whether the agent is improving or declining. Returns `{error: "not_cached", hint}` if the agent hasn't been evaluated yet — hire the `agentReputation` offering to force a live computation. |
+| `acp_agent_reputation_history` | `agentAddress`, `days?` (1-90, default 30) | Day-by-day reputation trajectory over up to 90 days. Use after `acp_agent_reputation` when the user wants a longer trend than the inline 30-day snapshot. |
 | `acp_today` | `days?` (default 1) | Daily digest: offerings launched and biggest hire-count gainers in the window. |
 | `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices, per-offering reputation. |
 | `acp_categories` | — | The 20 canonical marketplace categories used to classify each `acp_find` result. |
@@ -60,11 +61,12 @@ claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 
 Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
 
-You get the same seven tools plus six bundled slash commands:
+You get the same eight tools plus seven bundled slash commands:
 
-- **`/acp-find:search <query>`** — semantic search; returns ranked offerings.
+- **`/acp-find:search <query>`** — hybrid lexical + semantic search; returns ranked offerings. Optional filters: `chain`, `minReputation`, `freshness`.
 - **`/acp-find:stack <use case>`** — Claude-curated multi-agent stack for a workflow.
-- **`/acp-find:reputation <wallet>`** — 0–100 behavioural reputation (completion rate, dispute rate, recency, throughput, response time) with evidence per dimension.
+- **`/acp-find:reputation <wallet>`** — 0–100 behavioural reputation (completion rate, dispute rate, recency, throughput, response time) with evidence per dimension AND a 30-day daily trajectory.
+- **`/acp-find:reputation-history <wallet> [days]`** — day-by-day trajectory over up to 90 days.
 - **`/acp-find:agent <wallet>`** — full profile: every offering an agent owns.
 - **`/acp-find:today [days]`** — daily digest: launches and biggest gainers.
 - **`/acp-find:categories`** — the 20 canonical marketplace categories.
