@@ -1,25 +1,56 @@
 # acp-find-mcp
 
+[![npm version](https://img.shields.io/npm/v/acp-find-mcp.svg)](https://www.npmjs.com/package/acp-find-mcp)
+[![gateway status](https://img.shields.io/website?url=https%3A%2F%2Fapi.acp-metabot.dev%2Fv1%2Fhealth&label=gateway&up_message=live&down_message=down)](https://api.acp-metabot.dev/v1/health)
+
 MCP server for searching the [Virtuals Protocol ACP](https://whitepaper.virtuals.io/acp) (Agent Commerce Protocol) marketplace from any MCP-capable client — Cursor, Cline, Windsurf, Codex, Continue, Claude Code, Claude Desktop, and others.
 
-The marketplace has ~30,000+ on-chain agent offerings across thousands of agents, spanning both **ACP V1** (legacy) and **ACP V2** (the new generation). This server lets your AI assistant find the right one across both versions (and look up reputation, compose multi-agent stacks, browse what's new) without leaving the editor.
+The marketplace has ~30,000+ on-chain agent offerings across thousands of agents, spanning both **ACP V1** (legacy) and **ACP V2** (the new generation). This server lets your AI assistant find the right one across both versions, look up reputation, compose multi-agent stacks, compare candidates, and browse what's new — without leaving the editor.
 
 > **Status:** Live. Public gateway at `https://api.acp-metabot.dev` is up,
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
-## Tools
+## Tools (14)
+
+### Search & discovery
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + `bestMatch` flag when top score ≥ 0.7. Each result carries a `marketplaceVersion` field (`"v1"` or `"v2"`) so callers can render a version badge. Hybrid BM25 + dense fusion catches rare-keyword queries (contract addresses, tickers, niche jargon) alongside semantic ones. Hides offerings with no hires in 90d by default. Filters: `chain` (e.g. `["base","base-sepolia"]`), `minReputation` (0-100, agents not yet evaluated pass through), `freshness` (numeric replacement for `includeStale`), `marketplace` (`"v1"` or `"v2"`) restricts to one ACP marketplace — omit for cross-version (default). |
-| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?`, `marketplace?` | Curated multi-agent stack with rationale. `marketplace` (`"v1"` or `"v2"`) restricts the candidate pool to one ACP marketplace; omit for cross-version. |
-| `acp_agent_reputation` | `agentAddress` | Cached on-chain behavioural reputation (0–100). Sub-scores for completion rate, dispute rate, recency, 30-day throughput, and avg response time, each with evidence + percentile vs corpus. Returns the latest score plus a 30-day daily trajectory so you can see whether the agent is improving or declining. Returns `{error: "not_cached", hint}` if the agent hasn't been evaluated yet — hire the `agentReputation` offering on the marketplace to force a live computation. |
-| `acp_agent_reputation_history` | `agentAddress`, `days?` (1-90, default 30) | Day-by-day reputation trajectory over up to 90 days. Use after `acp_agent_reputation` when you need a longer trend than the inline 30-day snapshot. |
-| `acp_today` | `days?` (default 1), `marketplace?` | Daily digest: launches and biggest hire-count gainers in the window. `marketplace` (`"v1"` or `"v2"`) restricts to one ACP marketplace; omit for cross-version. |
-| `acp_browse_agent` | `agentAddress` | Full profile: every offering an agent owns, with descriptions, schemas, prices. Each offering carries `marketplaceVersion` (`"v1"` or `"v2"`). |
-| `acp_categories` | — | The 20 canonical marketplace categories used to classify each result. |
-| `acp_health` | — | Diagnostic: gateway URL, server version, indexed-corpus size, last fetch, ping latency. |
+| `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`) and `marketplaceUrl`. Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
+| `acp_search_agents` | `query`, `limit?`, `marketplace?` | Agent-level search (vs offering-level `acp_find`). |
+| `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?`, `chain?`, `marketplace?` | Curated multi-agent stack with rationale. |
+
+### Agent / offering deep-dive
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_browse_agent` | `agentAddress` | Full agent profile: every offering with descriptions, schemas, prices, per-offering reputation. |
+| `acp_offering` | `agentAddress`, `offeringName` | Single-offering deep-dive — full description, requirement schema, price, lifetime hires. |
+| `acp_compare_agents` | `agentAddresses` (2-5) | Side-by-side comparison: offerings count, summary reputation, behavioural reputation per agent. |
+
+### Reputation
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_reputation` | `agentAddress` | 0-100 behavioural reputation with sub-scores + 30-day inline trajectory. Returns `{error: "not_cached", hint, marketplaceUrl}` for unevaluated agents. |
+| `acp_agent_reputation_history` | `agentAddress`, `days?` (1-90, default 30) | Day-by-day reputation trajectory. |
+| `acp_agent_recent_jobs` | `agentAddress`, `days?`, `limit?` | Real on-chain job ledger (jobId, status, counterparty, amount, createdAt). |
+
+### Marketplace pulse
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_today` | `days?` (default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Daily digest: launches and biggest hire-count gainers in the window. |
+| `acp_recent_hires` | `days?` (default 7), `limit?`, `category?`, `chain?`, `priceMaxUsdc?`, `marketplace?` | Top offerings by absolute hire-count delta. |
+| `acp_categories` | — | Canonical marketplace categories with `offeringCount` per category. Cached 5 min. |
+
+### Operations
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_watch_status` | `watchId` | Read-only status of a marketplace watch (alive/expired, expiry, alerts fired, query, filters). Sensitive fields are NOT returned. |
+| `acp_health` | — | Diagnostic: gateway URL, server version, plugin version, MCP protocol version, indexed-corpus size with V1/V2 split, last fetch, ping latency. Cached 5 min. |
 
 ## Install
 
@@ -89,6 +120,30 @@ claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 claude mcp add acp-find -- npx -y acp-find-mcp
 ```
 
+### Docker
+
+If you don't have Node 22+ on your machine, run via Docker. The image is published as `oliverpringle/acp-find-mcp` (and the `Dockerfile` ships in this folder for self-build).
+
+```json
+{
+  "mcpServers": {
+    "acp-find": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "oliverpringle/acp-find-mcp:latest"]
+    }
+  }
+}
+```
+
+The `-i` (interactive) flag is critical — MCP runs over stdio. Self-build:
+
+```bash
+git clone https://github.com/oliver-pringle/acp-find-plugin
+cd acp-find-plugin/mcp-server
+docker build -t acp-find-mcp .
+docker run --rm -i acp-find-mcp
+```
+
 ### Verify
 
 After restarting your client, ask it:
@@ -109,7 +164,11 @@ What does the agent at 0xfc9f1ff5ec524759c1dc8e0a6eba6c22805b9d8b do?
 Compose a stack to monitor whale wallet movements and alert me on Telegram.
 
 What's new on the ACP marketplace this week?
+
+Compare these wallets: 0xabc..., 0xdef..., 0x123...
 ```
+
+A 30-prompt cookbook grouped by intent (find / vet / compose / research / browse) lives in the [main repo README](https://github.com/oliver-pringle/acp-find-plugin#try-it--prompt-cookbook).
 
 ## Configuration
 
@@ -117,6 +176,7 @@ What's new on the ACP marketplace this week?
 |---|---|---|
 | `ACP_API_URL` | `https://api.acp-metabot.dev` | Gateway base URL. Override only for local dev. |
 | `ACP_API_KEY` | unset | Sent as `X-API-Key`. Only needed against a private/self-hosted gateway. |
+| `ACP_VERBOSE` | unset | When set (or pass `--verbose` on argv), logs every gateway request/response to stderr. |
 
 To run against a self-hosted gateway, add an `env` block:
 
@@ -143,20 +203,27 @@ Your MCP client (Cursor / Cline / Windsurf / Codex / Continue / Claude)
    ▼ MCP stdio
 acp-find-mcp (Node, no deps)
    │
-   ▼ HTTPS
+   ▼ HTTPS, with 1-retry on 5xx
 api.acp-metabot.dev (public gateway, rate-limited)
    │
    ▼ Internal HTTP
-ACP_Metabot indexer + Voyage embeddings + Claude composer
+ACP_Metabot indexer + Voyage embeddings + Claude composer + chain-event scanner
    │
    ▼ SQLite vector index of every ACP marketplace offering
 ```
 
 The index refreshes every 10 min from both **ACP V1** (`https://acpx.virtuals.io/`) and **ACP V2** (`https://api.acp.virtuals.io`). Results track live marketplace state across both versions within ~10 min.
 
+## Privacy & telemetry
+
+The public gateway at `api.acp-metabot.dev` logs the **client IP, the request path, and the request body** into a request-log table. The IP is used solely to enforce per-IP rate limits; logs are kept for operator metrics. There is no separate analytics provider, no user identifier, and no cross-request correlation beyond IP.
+
+The MCP server itself adds **no telemetry**. It only contacts the gateway you configure. If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
+
 ## Requirements
 
 - Node 22 or later (uses built-in `fetch`, `readline`, `AbortSignal.timeout`).
+- Or run via Docker (above) — no Node install required.
 
 ## Source & contributing
 
