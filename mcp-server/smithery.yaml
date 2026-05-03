@@ -1,0 +1,35 @@
+# Smithery (https://smithery.ai) discovery + install metadata for the npm
+# `acp-find-mcp` package. Smithery indexes this file so users in Cursor,
+# Continue, and other clients can install with one click.
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      acpApiUrl:
+        type: string
+        title: Gateway URL
+        description: ACP_Metabot gateway base URL. Defaults to the public hosted gateway.
+        default: "https://api.acp-metabot.dev"
+      acpApiKey:
+        type: string
+        title: API Key (optional)
+        description: X-API-Key header value. Only needed against a self-hosted/private gateway. Leave blank to use the public gateway.
+      acpVerbose:
+        type: boolean
+        title: Verbose logging
+        description: Log every gateway request/response to stderr.
+        default: false
+  commandFunction: |
+    (config) => {
+      const env = {};
+      if (config?.acpApiUrl) env.ACP_API_URL = config.acpApiUrl;
+      if (config?.acpApiKey) env.ACP_API_KEY = config.acpApiKey;
+      if (config?.acpVerbose) env.ACP_VERBOSE = "1";
+      return {
+        command: "npx",
+        args: ["-y", "acp-find-mcp"],
+        env,
+      };
+    }
