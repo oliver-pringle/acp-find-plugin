@@ -12,6 +12,20 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.7.0
+
+Backed by **TheMetaBot v1.7** (meta-search release). Five extensions — all additive:
+
+1. **Hybrid agent search** — `acp_search_agents` upgraded to BM25 + dense embedding + Voyage rerank. Picks up synonyms and paraphrase; wording no longer needs to match exactly. New response fields: `agentScore`, `marketplaces`, `dominantMarketplace`, `topOfferings` (records with price + marketplace), `topOfferingNames` (flat mirror). Response key is `agents`.
+2. **V1/V2 cross-presence** — `acp_browse_agent` gains a `crossPresence` block (`{ v1: { offeringCount }, v2: { offeringCount }, dominantMarketplace }`). Each offering gains `pricePercentile`.
+3. **Saturation flag** — `acp_find` results gain `saturation` (`nearDuplicateCount`, `categorySize`). High `nearDuplicateCount` = crowded niche.
+4. **Pricing percentile** — `acp_find` results gain `pricePercentile` (`value` 0-100 within category × marketplace, `peerN`, `lowN`). Near-100 with `peerN ≥ 5` = premium pricing for the category.
+5. **Marketplace pulse** — `acp_today` gains pulse fields (`newAgents`, `churnRate`, `cohortSurvival`, `saturationMap`, `partial`, `windowStart`) and expands `days` max from 30 to 90.
+
+Full spec: [2026-05-04-metabot-v1-7-meta-search-design.md](https://github.com/oliver-pringle/ACP_Metabot/blob/main/docs/superpowers/specs/2026-05-04-metabot-v1-7-meta-search-design.md)
+
+Backward-compatibility notes — see [`mcp-server/README.md#v070-backward-compatibility-notes`](mcp-server/README.md#v070-backward-compatibility-notes).
+
 ## What you get
 
 The bundled MCP server exposes **14 tools**:
@@ -20,15 +34,15 @@ The bundled MCP server exposes **14 tools**:
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket (`high` / `medium` / `low` / `sketchy` / `none`) and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`) and `marketplaceUrl` for one-click hire. Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
-| `acp_search_agents` | `query`, `limit?`, `marketplace?` | Agent-level search (vs offering-level `acp_find`). Use to discover *providers* rather than specific services. |
+| `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket (`high` / `medium` / `low` / `sketchy` / `none`) and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`), `marketplaceUrl`, **`saturation`** (nearDuplicateCount, categorySize), and **`pricePercentile`** (value, peerN, lowN). Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
+| `acp_search_agents` | `query`, `limit?`, `marketplace?` | Hybrid agent-level search (BM25 + dense + Voyage rerank). Response key `agents`. Each agent gains **`agentScore`**, **`marketplaces`**, **`dominantMarketplace`**, **`topOfferings`** (records), **`topOfferingNames`** (mirror). |
 | `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?`, `chain?`, `marketplace?` | Curated multi-agent stack with rationale. Each offering tagged with `marketplaceVersion` + `marketplaceUrl`. |
 
 ### Agent / offering deep-dive
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_browse_agent` | `agentAddress` | Full agent profile: every offering with descriptions, schemas, prices, per-offering reputation, `marketplaceUrl`. |
+| `acp_browse_agent` | `agentAddress` | Full agent profile: every offering with descriptions, schemas, prices, per-offering reputation + **`pricePercentile`**, `marketplaceUrl`. Top-level **`crossPresence`** block: V1/V2 offering counts + `dominantMarketplace`. |
 | `acp_offering` | `agentAddress`, `offeringName` | Single-offering deep-dive — full description, requirement schema, price, lifetime hires, per-offering reputation. Faster than browsing the whole agent when only one offering matters. |
 | `acp_compare_agents` | `agentAddresses` (2-5) | Side-by-side comparison: offerings count, summary reputation, behavioural reputation per agent. |
 
@@ -44,7 +58,7 @@ The bundled MCP server exposes **14 tools**:
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_today` | `days?` (default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Daily digest: launches and biggest hire-count gainers in the window. |
+| `acp_today` | `days?` (1-90, default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Marketplace pulse digest: launches, gainers, plus pulse fields **`newAgents`**, **`churnRate`**, **`cohortSurvival`** (null when days < 30), **`saturationMap`** (per-category), **`partial`**, **`windowStart`**. |
 | `acp_recent_hires` | `days?` (default 7), `limit?`, `category?`, `chain?`, `priceMaxUsdc?`, `marketplace?` | Top offerings by absolute hire-count delta in window. Pure "what's getting hired right now" — distinct from `acp_today`. |
 | `acp_categories` | — | The canonical marketplace categories with `offeringCount` per category. Cached 5 min. |
 

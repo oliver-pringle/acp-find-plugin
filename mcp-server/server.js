@@ -201,7 +201,7 @@ const TOOLS = [
   {
     name: "acp_find",
     description:
-      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, a `marketplaceVersion` (`v1` | `v2`), a `marketplaceUrl` for one-click hire, and a reputation block. Searches V1 + V2 marketplaces in one call by default. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Returns a `confidence` bucket (high|medium|low|sketchy|none) derived from the top score. Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category, marketplace, offset (pagination). Use for 'is there an agent that can do X' questions.",
+      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, a `marketplaceVersion` (`v1` | `v2`), a `marketplaceUrl` for one-click hire, and a reputation block. Searches V1 + V2 marketplaces in one call by default. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Returns a `confidence` bucket (high|medium|low|sketchy|none) derived from the top score. Each result now includes `saturation` (nearDuplicateCount + categorySize — how crowded the niche is) and `pricePercentile` (value 0-100 within category × marketplace, peerN, lowN flag). Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category, marketplace, offset (pagination). Use for 'is there an agent that can do X' questions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -334,15 +334,15 @@ const TOOLS = [
   {
     name: "acp_today",
     description:
-      "Daily digest of the ACP marketplace. Returns offerings launched in the last N days plus the biggest hire-count gainers (when comparison data is available). Each result is tagged with `marketplaceVersion` and `marketplaceUrl`. Spans both marketplaces by default. Optional filters: chain, priceMaxUsdc, marketplace. Use for 'what's new on ACP', 'show me what just launched', 'what's trending'.",
+      "Marketplace pulse digest. Returns offerings launched in the last N days plus the biggest hire-count gainers. Window: 1–90 days (default 1). Each result is tagged with `marketplaceVersion` and `marketplaceUrl`. Spans both marketplaces by default. Response includes pulse fields: `newAgents` (agent inflow in window), `churnRate` (fraction gone inactive), `cohortSurvival` (null when days < 30), `saturationMap` (per-category near-duplicate density), `partial` (true when window crosses a data gap). Optional filters: chain, priceMaxUsdc, marketplace. Use for 'what's new on ACP', 'show me what just launched', 'what's trending', or 'show me marketplace health stats'.",
     inputSchema: {
       type: "object",
       properties: {
         days: {
           type: "number",
-          description: "Lookback window in days (1-30). Default 1 (last 24h).",
+          description: "Lookback window in days (1-90). Default 1 (last 24h).",
           minimum: 1,
-          maximum: 30
+          maximum: 90
         },
         priceMaxUsdc: {
           type: "number",
@@ -364,7 +364,7 @@ const TOOLS = [
   {
     name: "acp_browse_agent",
     description:
-      "Full profile for an ACP agent by wallet address. Returns the agent's reputation summary plus every offering they own with full descriptions, requirement schemas, prices, per-offering reputation, and a `marketplaceUrl`. Use when the user pastes a wallet address and asks 'what does this agent do', or after acp_find when the user wants the full picture of a specific agent.",
+      "Full profile for an ACP agent by wallet address. Returns the agent's reputation summary plus every offering they own with full descriptions, requirement schemas, prices, per-offering reputation, and a `marketplaceUrl`. In v1.7 the response also includes a top-level `crossPresence` block summarising the agent's V1/V2 footprint (offeringCount per marketplace, dominantMarketplace: 'v1'|'v2'|'tied'|'none') and per-offering `pricePercentile` (value 0-100, peerN, lowN). Use when the user pastes a wallet address and asks 'what does this agent do', or after acp_find when the user wants the full picture of a specific agent.",
     inputSchema: {
       type: "object",
       properties: {
@@ -498,7 +498,7 @@ const TOOLS = [
   {
     name: "acp_search_agents",
     description:
-      "Search for AGENTS (not offerings) by query against agent name + bio + total offerings. Distinct from acp_find which searches the offering corpus. Use when the user wants to discover providers by what THEY do across all their offerings, rather than picking one specific service.",
+      "Hybrid (BM25 + dense + Voyage rerank) agent search. Searches AGENTS (not offerings) by query against agent name + bio + aggregated offering descriptions. Distinct from acp_find which searches the offering corpus. Returns ranked agents with `marketplaces` (array of 'v1'|'v2' where the agent has offerings), `dominantMarketplace` ('v1'|'v2'|'tied'|'none'), `agentScore` (post-rerank cosine, higher = more relevant — treat as opaque rank signal), `topOfferings` (records with offeringName, priceUsdc, marketplaceVersion), and `topOfferingNames` (mirror of names-only for quick display). Response key is `agents`. Use when the user wants to discover providers by what THEY do across all their offerings.",
     inputSchema: {
       type: "object",
       properties: {

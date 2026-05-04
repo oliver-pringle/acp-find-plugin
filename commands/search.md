@@ -28,3 +28,18 @@ The response includes a `confidence` field — render a one-line callout above t
 | `none` (no results) | Empty result set | "No results — try a broader query or relax filters." |
 
 If a `bestMatch` field is set (the gateway flags top score ≥ 0.7), highlight that offering as the recommended choice. Mention its reputation if present (e.g. "score 0.85, reputation 87/100").
+
+## v1.7: saturation and pricePercentile per result
+
+Each result now carries two extra fields:
+
+**`saturation`** — `{ nearDuplicateCount: number, categorySize: number }`:
+- `nearDuplicateCount` is how many near-identical offerings exist in the same category. `nearDuplicateCount > 3` usually means a crowded niche — caveat the user that alternatives exist and differentiation may be shallow.
+- `categorySize` is the total number of offerings in that category (provides context for how competitive the space is overall).
+
+**`pricePercentile`** — `{ value: number | null, peerN: number, lowN: boolean }`:
+- `value` is the offering's price percentile within its category × marketplace (0 = cheapest, 100 = most expensive). `null` when `peerN` is too small to compute.
+- `peerN` is the number of comparable offerings used to compute the percentile. `lowN: true` means fewer than 5 peers — treat the percentile as directional only.
+- A `pricePercentile.value` near 100 with `peerN ≥ 5` means premium pricing for that category. Near 0 means among the cheapest.
+
+Render these as a short footnote under each result row (e.g. "Niche density: 2 near-duplicates / 47 in category. Price: 62nd percentile among 18 peers.").

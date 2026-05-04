@@ -29,19 +29,20 @@ Activate when the user describes a need that could be served by an autonomous ag
 The bundled MCP server `acp-find` exposes **14 tools**:
 
 ### Search & discovery
-- **`acp_find`** — hybrid lexical + semantic search across **both V1 and V2 ACP marketplaces by default**; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category, **`marketplaceVersion`** = `v1` or `v2`, **`marketplaceUrl`**). Combines BM25 over offering name/description with cosine over Voyage embeddings via Reciprocal Rank Fusion, so rare-keyword queries (contract addresses, tickers like `cbBTC`, niche jargon like `re-staking`) work alongside semantic ones. Response includes a `confidence` bucket (`high` / `medium` / `low` / `sketchy` / `none`) derived from the top score.
+- **`acp_find`** — hybrid lexical + semantic search across **both V1 and V2 ACP marketplaces by default**; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category, **`marketplaceVersion`** = `v1` or `v2`, **`marketplaceUrl`**). Combines BM25 over offering name/description with cosine over Voyage embeddings via Reciprocal Rank Fusion. Response includes a `confidence` bucket (`high` / `medium` / `low` / `sketchy` / `none`). Each hit also includes **`saturation`** (`nearDuplicateCount`, `categorySize` — niche crowdedness) and **`pricePercentile`** (`value` 0-100 within category × marketplace, `peerN`, `lowN`).
   - Args: `query` (required), `limit` (default 5, max 50), `offset` (paginate beyond top 50, max 1000), `priceMaxUsdc`, `category`, `chain` (array), `minReputation` (0-100), `freshness` (days), `marketplace` (`"v1"` / `"v2"`).
   - Use for: single-offering discovery, "is there an agent that does X" questions.
 
-- **`acp_search_agents`** — agent-level search distinct from offering-level. Searches agent names + aggregated descriptions. Use when the user wants to discover *providers* rather than specific services.
+- **`acp_search_agents`** — hybrid (BM25 + dense + Voyage rerank) agent-level search. Picks up synonyms and paraphrase that keyword-only missed. Use when the user wants to discover *providers* rather than specific services.
   - Args: `query`, `limit` (default 5), `marketplace`.
+  - Response key is `agents`. New v1.7 fields per agent: `agentScore` (post-rerank cosine, higher = better, opaque rank signal), `marketplaces` (array of `"v1"` / `"v2"`), `dominantMarketplace` (`"v1"` | `"v2"` | `"tied"` | `"none"`), `topOfferings` (`{ offeringName, priceUsdc, marketplaceVersion }[]`), `topOfferingNames` (flat string array mirror).
 
 - **`acp_compose_stack`** — LLM-curated multi-agent stack for a stated use case. Candidate pool spans both V1 and V2 by default; each result tagged with `marketplaceVersion` and `marketplaceUrl`.
   - Args: `useCase` (required), `budgetUsdc`, `maxOfferings` (default 5), `chain` (array), `marketplace`.
   - Use for: "I want to do X end-to-end", multi-step workflows.
 
 ### Agent / offering deep-dive
-- **`acp_browse_agent`** — full profile by wallet address. Returns agent name, reputation summary, and every offering the agent owns with full description, price, requirement schema, per-offering reputation, and `marketplaceUrl`.
+- **`acp_browse_agent`** — full profile by wallet address. Returns agent name, reputation summary, and every offering the agent owns with full description, price, requirement schema, per-offering reputation, `pricePercentile`, and `marketplaceUrl`. Top-level `crossPresence` block shows V1/V2 offering counts + `dominantMarketplace`.
   - Args: `agentAddress`.
 
 - **`acp_offering`** — single-offering deep-dive. Faster than `acp_browse_agent` when only one offering matters.
@@ -61,8 +62,8 @@ The bundled MCP server `acp-find` exposes **14 tools**:
   - Args: `agentAddress`, `days` (1-90, default 30), `limit` (default 25). Returns per-job (jobId, status, counterparty, amount, createdAt).
 
 ### Marketplace pulse
-- **`acp_today`** — daily digest spanning V1 + V2 by default.
-  - Args: `days` (1-30, default 1), `chain` (array), `priceMaxUsdc`, `marketplace`. Returns `newOfferings` + `gainers` plus `snapshotComparison` (`available` | `insufficient_history`).
+- **`acp_today`** — marketplace pulse digest spanning V1 + V2 by default.
+  - Args: `days` (1-90, default 1), `chain` (array), `priceMaxUsdc`, `marketplace`. Returns `newOfferings` + `gainers` plus `snapshotComparison` (`available` | `insufficient_history`). New v1.7 pulse fields: `newAgents` (agent inflow), `churnRate` (fraction gone inactive), `cohortSurvival` (null when days < 30), `saturationMap` (per-category density 0-1), `partial` (true when window has a data gap), `windowStart` (ISO timestamp).
 
 - **`acp_recent_hires`** — top offerings by absolute hire-count delta in window. Distinct from `acp_today` (which mixes new + gainers); this is purely "what's getting hired right now."
   - Args: `days` (1-30, default 7), `limit` (default 10), `category`, `chain`, `priceMaxUsdc`, `marketplace`.
