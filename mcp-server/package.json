@@ -1,6 +1,6 @@
 {
   "name": "acp-find-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "MCP server for searching the Virtuals Protocol ACP marketplace. Exposes 14 tools — search, compose-stack, agent-reputation (+ history), today, browse-agent, offering deep-dive, compare-agents, watch-status, recent-hires, agent-recent-jobs, search-agents, categories, health — backed by the public api.acp-metabot.dev gateway. Works in Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop.",
   "type": "module",
   "main": "server.js",

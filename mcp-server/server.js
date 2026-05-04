@@ -23,6 +23,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf-8")
 const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").replace(/\/$/, "");
 const API_KEY = process.env.ACP_API_KEY;
 const VERBOSE = !!process.env.ACP_VERBOSE || process.argv.includes("--verbose");
+const DISABLE_BOOT_BEACON = !!process.env.ACP_DISABLE_BOOT_BEACON;
 const SERVER_NAME = "acp-find";
 const SERVER_VERSION = pkg.version;
 const PROTOCOL_VERSION = "2025-11-25";
@@ -30,6 +31,7 @@ const MARKETPLACE_URL_BASE = "https://app.virtuals.io/acp/agents";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const RETRY_BACKOFF_MS = 200;
 const REQUEST_TIMEOUT_MS = 30000;
+const BOOT_BEACON_TIMEOUT_MS = 5000;
 
 // --- helpers ---------------------------------------------------------------
 
@@ -161,6 +163,36 @@ async function callGateway(path, body, method = "POST") {
   const json = await res.json();
   logVerbose(`← ${method} ${path} ${res.status} (${Date.now() - startedAt}ms)`);
   return json;
+}
+
+// One identifying beacon to the gateway, fired right after MCP `initialize`
+// is handled, so the operator can distinguish "npx-cache populated" from
+// "MCP client actually connected and started this server". Same data
+// already captured for any other request (User-Agent, IP, timestamp) — no
+// separate identifier, no body content. Opt out with ACP_DISABLE_BOOT_BEACON=1.
+//
+// Fire-and-forget: never throws, never blocks. A failed beacon never gates
+// startup. The `bootBeaconFired` flag ensures we only fire once per process,
+// not once per re-init request from a buggy or reconnecting client.
+let bootBeaconFired = false;
+function fireBootBeacon() {
+  if (bootBeaconFired) return;
+  bootBeaconFired = true;
+  if (DISABLE_BOOT_BEACON) {
+    logVerbose("boot beacon: disabled via ACP_DISABLE_BOOT_BEACON");
+    return;
+  }
+
+  const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+  if (API_KEY) headers["X-API-Key"] = API_KEY;
+
+  fetch(`${API_URL}/v1/plugin/boot`, {
+    method: "POST",
+    headers,
+    signal: AbortSignal.timeout(BOOT_BEACON_TIMEOUT_MS),
+  })
+    .then((res) => logVerbose(`boot beacon: ${res.status}`))
+    .catch((err) => logVerbose(`boot beacon failed: ${err.message}`));
 }
 
 // --- tool definitions ------------------------------------------------------
@@ -789,6 +821,7 @@ async function handleRequest(req) {
 
   switch (method) {
     case "initialize":
+      fireBootBeacon();
       return send({
         jsonrpc: "2.0",
         id,
