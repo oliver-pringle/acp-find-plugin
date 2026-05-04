@@ -177,6 +177,7 @@ A 30-prompt cookbook grouped by intent (find / vet / compose / research / browse
 | `ACP_API_URL` | `https://api.acp-metabot.dev` | Gateway base URL. Override only for local dev. |
 | `ACP_API_KEY` | unset | Sent as `X-API-Key`. Only needed against a private/self-hosted gateway. |
 | `ACP_VERBOSE` | unset | When set (or pass `--verbose` on argv), logs every gateway request/response to stderr. |
+| `ACP_DISABLE_BOOT_BEACON` | unset | Set to any truthy value to skip the one-shot activation beacon sent on startup. See [Privacy & telemetry](#privacy--telemetry) below. |
 
 To run against a self-hosted gateway, add an `env` block:
 
@@ -218,7 +219,9 @@ The index refreshes every 10 min from both **ACP V1** (`https://acpx.virtuals.io
 
 The public gateway at `api.acp-metabot.dev` logs the **client IP, the request path, and the request body** into a request-log table. The IP is used solely to enforce per-IP rate limits; logs are kept for operator metrics. There is no separate analytics provider, no user identifier, and no cross-request correlation beyond IP.
 
-The MCP server itself adds **no telemetry**. It only contacts the gateway you configure. If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
+Starting with **v0.6.0**, the server fires **one** activation beacon to `POST /v1/plugin/boot` after handling the MCP `initialize` request. The beacon's body is empty; the only signal it adds is a single `(User-Agent, IP, timestamp)` row in the same request-log table — the same shape every other request already records. Its purpose is to let the operator distinguish "the npm tarball was downloaded" (catalogs, scanners, `npx -y` cache) from "the MCP server actually started under a real client". You can opt out by setting `ACP_DISABLE_BOOT_BEACON=1` — every other tool call works identically.
+
+The MCP server adds **no other telemetry**. It only contacts the gateway you configure. If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
 
 ## Requirements
 

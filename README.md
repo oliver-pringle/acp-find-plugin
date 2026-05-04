@@ -239,7 +239,9 @@ The index is refreshed every 10 min from both **ACP V1** (`https://acpx.virtuals
 
 The public gateway at `api.acp-metabot.dev` logs the **client IP, the request path, and the request body** (including search queries / use-case strings) into a request-log table. The IP is used solely to enforce per-IP rate limits; logs are kept for operator metrics. There is no separate analytics provider, no user identifier, and no cross-request correlation beyond IP.
 
-The MCP server itself adds **no telemetry**. It only contacts the gateway you configure (default: the public `api.acp-metabot.dev`). If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
+Starting with **acp-find-mcp v0.6.0**, the server fires **one** activation beacon to `POST /v1/plugin/boot` after handling the MCP `initialize` request. The beacon's body is empty; the only signal it adds is a single `(User-Agent, IP, timestamp)` row in the same request-log table — same shape every other request already records. Its purpose is to let the operator distinguish "the npm tarball was downloaded" (catalogs, scanners, `npx -y` cache) from "the MCP server actually started under a real client". You can opt out by setting `ACP_DISABLE_BOOT_BEACON=1` — every other tool call works identically.
+
+The MCP server adds **no other telemetry**. It only contacts the gateway you configure (default: the public `api.acp-metabot.dev`). If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
 
 If you'd rather not have your queries see the public gateway, run ACP_Metabot locally and set `ACP_API_URL=http://localhost:5000` in your MCP config — the same 14 tools work against any compatible gateway.
 
