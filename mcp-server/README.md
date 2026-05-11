@@ -27,7 +27,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (18)
+## Tools (19)
 
 ### Search & discovery
 
@@ -76,6 +76,12 @@ ACP v2 has a first-class **Resources** primitive (`AcpAgentResource`: `{ name, u
 | Tool | Args | Returns |
 |---|---|---|
 | `acp_estimate_stack_cost` | `items[]` (each: `priceUsd`, `priceType?` / `type?`, `usesPerMonth?`, `durationDays?`, plus optional `agentAddress` / `offeringName` for legibility), `budgetUsdMonthly?` | Pure calculation — no network. One-shot rows: `monthly = priceUsd × usesPerMonth` (default 1). Subscription rows: `monthly = priceUsd × 30 / durationDays` (default 30). Response includes `totalUsdMonthly`, per-item `breakdown`, and (when `budgetUsdMonthly` is set) `withinBudget`, `remainingBudgetUsdMonthly`, `overBudgetUsdMonthly`. Use after `acp_compose_stack` to roll the whole stack into a monthly burn. |
+
+### On-chain composability
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_feed_address` | `agentAddress` | The on-chain ReputationAggregator (AggregatorV3Interface) contract address that TheMetaBot has published for the agent on **Base mainnet** (`chainId: 8453`). Surfaces `aggregatorAddress`, `decimals`, `latestScore`, `lastPushedRound`, `lastPushedAt`, `deployedAt`, `methodologyHash`, `explorerUrl` (Basescan), plus a `marketplaceUrl`. Returns `{ hasFeed: false, hint }` for agents without a published feed — only the top-N highest-reputation agents currently have feeds. Use this to integrate ACP agent reputation into Solidity gates: drop the address into `AggregatorV3Interface` and read `latestRoundData()` to score a counterparty on-chain without any off-chain API. |
 
 ### Operations
 

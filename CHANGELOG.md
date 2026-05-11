@@ -2,30 +2,33 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
-## 0.8.0 — drafted 2026-05-11 (unreleased — R7-IDEA-C + Resources end-to-end + cost projection)
+## 0.8.0 — drafted 2026-05-11 (unreleased — R7-IDEA-C + Resources end-to-end + cost projection + on-chain feed address)
 
-Closes the ACP v2 Resources loop end-to-end (discover → invoke) and adds a calculation-only stack cost projector.
+Closes the ACP v2 Resources loop end-to-end (discover → invoke), adds a calculation-only stack cost projector, and surfaces the on-chain Chainlink reputation aggregator address for Solidity integration.
 
 ### Added
 
-- **4 new MCP tools** (14 → 18):
+- **5 new MCP tools** (14 → 19):
   - `acp_agent_resources` — list one agent's indexed Resources by wallet address (R7-IDEA-C).
   - `acp_resources_search` — cross-agent search across name + description + agent name. Use to discover agents by the FREE pre-hire introspection surface they expose (R7-IDEA-C).
   - `acp_resource_call` — INVOKE a Resource. Looks up the registered URL via Metabot's index, then calls it directly. Returns the agent's JSON response (or rawText). Closes the loop: discovery → invocation, no payment, no hire.
   - `acp_estimate_stack_cost` — pure calculation, no network. Rolls a list of priced offerings into a projected monthly cost. One-shot: `priceUsd × usesPerMonth`. Subscription: `priceUsd × 30 / durationDays`. Optional `budgetUsdMonthly` check.
-- **3 new slash commands:**
+  - `acp_agent_feed_address` — on-chain composability. Returns the Base-mainnet ReputationAggregator (AggregatorV3Interface) contract address Metabot has published for the agent. Lets Solidity gate by ACP counterparty reputation via `latestRoundData()` without any off-chain API. Returns `{ hasFeed: false, hint }` for agents without a feed (only top-N highest-reputation agents currently have feeds).
+- **4 new slash commands:**
   - `/acp-find:resources <addr | query>` — auto-routes to `acp_agent_resources` (for addresses) or `acp_resources_search` (for free-text).
   - `/acp-find:resource-call <agent> <resource> [params]` — wraps `acp_resource_call`, accepts JSON / `k=v` / `addr/name` shorthands.
   - `/acp-find:cost` — wraps `acp_estimate_stack_cost`, pairs naturally with `/acp-find:stack`.
+  - `/acp-find:feed-address <addr>` — wraps `acp_agent_feed_address`. Renders the on-chain aggregator address with a ready-to-paste Solidity integration snippet.
 
 ### Backend (TheMetaBot)
 
 - New `agent_resources` SQLite table mirroring `AcpAgentResource` (name + url + params + description) per indexed V2 agent.
 - `AcpV2MarketplaceSource` writes resources as a side-effect of its per-wallet fetch — no change to the `IMarketplaceSource` contract.
-- Two new HTTP endpoints on the public gateway:
+- Three new HTTP endpoints on the public gateway:
   - `GET /v1/agent/{address}/resources` — per-agent list (sits alongside the existing `/v1/agent/{address}` browse endpoint). Used by both `acp_agent_resources` AND `acp_resource_call` (the latter pulls the URL from here before forwarding to the agent's bot).
   - `GET /v1/marketplace/resources/search?query=...&limit=...&marketplace=...` — cross-agent substring search.
-- Both endpoints rate-limited at 120/IP/hr via the new `public-marketplace-resources` policy.
+  - `GET /v1/agent/{address}/feed-address` — per-agent reputation aggregator lookup. Reads from `reputation_feeds` (populated by the v0.1–v0.4 ReputationFeedPublisher + ReputationFeedSyncWorker pipeline). 404 with `hint` when no feed has been deployed.
+- All three endpoints rate-limited at 120/IP/hr via the `public-marketplace-resources` policy.
 
 ### Plugin transport
 

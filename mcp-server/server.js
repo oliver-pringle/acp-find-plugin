@@ -626,6 +626,21 @@ const TOOLS = [
       },
       required: ["items"]
     }
+  },
+  {
+    name: "acp_agent_feed_address",
+    description:
+      "Look up the on-chain Chainlink reputation aggregator (AggregatorV3Interface) address that TheMetaBot has published for an agent. Returned address is a per-agent ReputationAggregator contract on Base mainnet (chainId 8453) that exposes the agent's behavioural-reputation score as a standard `latestRoundData()` feed — letting Solidity code gate by counterparty reputation without going through any off-chain API. Use when the user wants to (a) verify-onchain integrate an agent's reputation into a smart contract, (b) check whether Metabot has published a feed for a given agent yet, or (c) get the explorer URL of the aggregator. Returns 404 with a 'not yet published' hint when no feed has been deployed for the agent (only the top-N highest-reputation agents currently have feeds).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        }
+      },
+      required: ["agentAddress"]
+    }
   }
 ];
 
@@ -1006,6 +1021,47 @@ const HANDLERS = {
       fetchedAt: new Date().toISOString(),
       response,
     };
+  },
+
+  acp_agent_feed_address: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    if (!isHexAddress(args.agentAddress)) {
+      throw new Error("agentAddress must be 0x followed by 40 hex chars");
+    }
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const url = `${API_URL}/v1/agent/${encodeURIComponent(addr)}/feed-address`;
+    const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    const startedAt = Date.now();
+    logVerbose(`→ GET /v1/agent/${addr}/feed-address`);
+    const res = await fetchWithRetry(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    logVerbose(`← GET /v1/agent/${addr}/feed-address ${res.status} (${Date.now() - startedAt}ms)`);
+    if (res.status === 404) {
+      const body = await res.json().catch(() => ({}));
+      return {
+        agentAddress: addr,
+        hasFeed: false,
+        hint:
+          body.hint ??
+          "No Chainlink reputation feed has been published for this agent yet. " +
+            "TheMetaBot only publishes feeds for the top-N highest-reputation agents.",
+        marketplaceUrl: agentUrl(addr),
+      };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `/v1/agent/${addr}/feed-address returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`
+      );
+    }
+    const json = await res.json();
+    json.hasFeed = true;
+    json.marketplaceUrl = agentUrl(addr);
+    return json;
   },
 
   // Pure calculation — rolls a list of priced offerings into a monthly cost.

@@ -28,7 +28,7 @@ Backward-compatibility notes — see [`mcp-server/README.md#v070-backward-compat
 
 ## What you get
 
-The bundled MCP server exposes **14 tools**:
+The bundled MCP server exposes **19 tools**:
 
 ### Search & discovery
 
@@ -61,6 +61,26 @@ The bundled MCP server exposes **14 tools**:
 | `acp_today` | `days?` (1-90, default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Marketplace pulse digest: launches, gainers, plus pulse fields **`newAgents`**, **`churnRate`**, **`cohortSurvival`** (null when days < 30), **`saturationMap`** (per-category), **`partial`**, **`windowStart`**. |
 | `acp_recent_hires` | `days?` (default 7), `limit?`, `category?`, `chain?`, `priceMaxUsdc?`, `marketplace?` | Top offerings by absolute hire-count delta in window. Pure "what's getting hired right now" — distinct from `acp_today`. |
 | `acp_categories` | — | The canonical marketplace categories with `offeringCount` per category. Cached 5 min. |
+
+### ACP v2 Resources
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_resources` | `agentAddress` | Per-agent list of indexed Resources (name, url, params schema, description, marketplace version, first/last seen). Resources are FREE, public, parameterised HTTP endpoints agents expose for pre-hire introspection. |
+| `acp_resources_search` | `query`, `limit?`, `marketplace?` | Cross-agent substring search over name + description + agent name. Use to discover agents by the free pre-hire surface they expose. |
+| `acp_resource_call` | `agentAddress`, `resourceName`, `params?` | INVOKE a Resource. Looks up URL via Metabot's index, then forwards directly to the agent's bot. Returns the agent's JSON response. No payment, no hire. |
+
+### Stack cost projection
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_estimate_stack_cost` | `items[]`, `budgetUsdMonthly?` | Pure calculation — no network. Rolls one-shot (`priceUsd × usesPerMonth`) and subscription (`priceUsd × 30 / durationDays`) rows into a projected monthly total with per-item breakdown + optional budget check. |
+
+### On-chain composability
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_feed_address` | `agentAddress` | On-chain ReputationAggregator (AggregatorV3Interface) address Metabot has published for the agent on **Base mainnet** (`chainId: 8453`). Surfaces `aggregatorAddress`, `decimals`, `latestScore`, `lastPushedRound`, `lastPushedAt`, `deployedAt`, `methodologyHash`, `explorerUrl`. Returns `{ hasFeed: false, hint }` for agents without a feed. Lets Solidity gate by counterparty reputation via `latestRoundData()` without any off-chain API. |
 
 ### Operations
 
@@ -109,7 +129,7 @@ claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 
 Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
 
-You get all 18 tools plus 16 bundled slash commands:
+You get all 19 tools plus 17 bundled slash commands:
 
 - **`/acp-find:search <query>`** — hybrid lexical + semantic search; returns ranked offerings with a confidence bucket.
 - **`/acp-find:search-agents <query>`** — agent-level search.
@@ -125,6 +145,7 @@ You get all 18 tools plus 16 bundled slash commands:
 - **`/acp-find:recent-hires [days]`** — top offerings by absolute hire-count delta.
 - **`/acp-find:resources <wallet | query>`** — list an agent's free public Resources, or search Resources across the marketplace.
 - **`/acp-find:resource-call <wallet> <name> [params]`** — invoke a Resource. Free, public, no hire — returns the agent's JSON response.
+- **`/acp-find:feed-address <wallet>`** — on-chain Chainlink reputation aggregator address (Base mainnet) Metabot has published for the agent, with a ready-to-paste Solidity integration snippet.
 - **`/acp-find:watch-status <watchId>`** — read-only watch status.
 - **`/acp-find:categories`** — canonical marketplace categories with offering counts.
 
@@ -260,7 +281,7 @@ Starting with **acp-find-mcp v0.6.0**, the server fires **one** activation beaco
 
 The MCP server adds **no other telemetry**. It only contacts the gateway you configure (default: the public `api.acp-metabot.dev`). If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
 
-If you'd rather not have your queries see the public gateway, run ACP_Metabot locally and set `ACP_API_URL=http://localhost:5000` in your MCP config — the same 14 tools work against any compatible gateway.
+If you'd rather not have your queries see the public gateway, run ACP_Metabot locally and set `ACP_API_URL=http://localhost:5000` in your MCP config — the same 19 tools work against any compatible gateway.
 
 ## License
 

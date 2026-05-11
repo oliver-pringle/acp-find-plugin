@@ -64,6 +64,7 @@ function startServer(env = {}) {
 }
 
 const EXPECTED_TOOLS = [
+  "acp_agent_feed_address",
   "acp_agent_recent_jobs",
   "acp_agent_reputation",
   "acp_agent_reputation_history",
@@ -107,7 +108,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 18 tools with required schemas", async () => {
+test("tools/list returns all 19 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -237,6 +238,31 @@ test("acp_resource_call requires agentAddress and resourceName", async () => {
     });
     assert.equal(r2.result.isError, true);
     assert.match(r2.result.content[0].text, /resourceName is required/);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_agent_feed_address validates address shape", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r1 = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_agent_feed_address", arguments: {} }
+    });
+    assert.equal(r1.result.isError, true);
+    assert.match(r1.result.content[0].text, /agentAddress is required/);
+
+    const r2 = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "acp_agent_feed_address", arguments: { agentAddress: "0xnotahexstring" } }
+    });
+    assert.equal(r2.result.isError, true);
+    assert.match(r2.result.content[0].text, /0x followed by 40 hex chars/);
   } finally {
     conn.close();
   }
