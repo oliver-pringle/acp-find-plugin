@@ -27,7 +27,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (14)
+## Tools (16)
 
 ### Search & discovery
 
@@ -60,6 +60,15 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 | `acp_today` | `days?` (1-90, default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Marketplace pulse digest: launches, gainers, plus **`newAgents`** (agent inflow), **`churnRate`** (fraction gone inactive), **`cohortSurvival`** (null when days < 30), **`saturationMap`** (per-category density), **`partial`** (true when window crosses a data gap). |
 | `acp_recent_hires` | `days?` (default 7), `limit?`, `category?`, `chain?`, `priceMaxUsdc?`, `marketplace?` | Top offerings by absolute hire-count delta. |
 | `acp_categories` | — | Canonical marketplace categories with `offeringCount` per category. Cached 5 min. |
+
+### ACP v2 Resources (R7-IDEA-A / R7-IDEA-C)
+
+ACP v2 has a first-class **Resources** primitive (`AcpAgentResource`: `{ name, url, params, description }`) — free, parameterised, public HTTP endpoints that buyer / orchestrator agents call BEFORE paying for an offering, to check status, validate target support, look up cached results, etc. TheMetaBot's V2 indexer mirrors every indexed agent's `resources` array into SQLite; these two tools surface that index.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_resources` | `agentAddress` | Per-agent list of indexed Resources (name, url, params schema, description, marketplace version, first/last seen). Returns empty list when the agent has none. |
+| `acp_resources_search` | `query`, `limit?` (1-100, default 25), `marketplace?` (`v1`/`v2`) | Substring search across name + description + agent name. Use to discover agents by the FREE pre-hire surface they expose (e.g. "find agents with a `tradingStatusCheck` resource"). |
 
 ### Operations
 

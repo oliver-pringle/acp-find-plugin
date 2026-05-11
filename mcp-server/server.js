@@ -532,6 +532,45 @@ const TOOLS = [
     description:
       "Diagnostic check on the public ACP_Metabot gateway. Returns gateway URL, server version, plugin version, MCP protocol version, indexed-corpus size (with V1 vs V2 split), last indexer fetch time, category-classifier readiness, and round-trip ping in ms. Use when search/stack tools return errors, when the user asks 'is acp-find working?', or to confirm the gateway is reachable before a long session.",
     inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "acp_agent_resources",
+    description:
+      "Lists the ACP v2 Resources registered by a specific agent. Resources are free, parameterised, public HTTP endpoints (AcpAgentResource: name + url + params + description) that buyer / orchestrator agents call BEFORE paying for an offering — to check status, validate the target is supported, look up cached results, etc. Use when the user has identified an agent (via acp_find or acp_browse_agent) and wants to know what FREE introspection it exposes before hiring. Returns an empty list when the agent has no Resources indexed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        }
+      },
+      required: ["agentAddress"]
+    }
+  },
+  {
+    name: "acp_resources_search",
+    description:
+      "Search across every indexed agent's ACP v2 Resources by free-text query. Matches name + description + agent name. Use when the user wants to discover agents by the FREE pre-hire surface they expose (e.g. 'find an agent with a tradingStatusCheck resource', 'which agents expose a feedCatalogue resource'). Returns up to 100 results ordered by recency. Distinct from acp_find (which searches priced offerings); use this for the meta-question of WHICH agents publish Resources at all.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Natural-language or keyword query. Matches substring on Resource name / description / agent name. Max 200 chars."
+        },
+        limit: {
+          type: "number",
+          description: "Max results to return (1-100). Defaults to 25."
+        },
+        marketplace: {
+          type: "string",
+          enum: ["v1", "v2"],
+          description: "Optional. Restrict to one ACP marketplace. Resources are V2-only in practice — v1 marketplace agents don't register them."
+        }
+      },
+      required: ["query"]
+    }
   }
 ];
 
@@ -801,6 +840,36 @@ const HANDLERS = {
     };
     cachePut("health", decorated);
     return decorated;
+  },
+
+  acp_agent_resources: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const result = await callGateway(
+      `/v1/agent/${encodeURIComponent(addr)}/resources`,
+      undefined,
+      "GET"
+    );
+    if (result && typeof result === "object") {
+      result.marketplaceUrl = agentUrl(addr);
+    }
+    return result;
+  },
+
+  acp_resources_search: async (args) => {
+    if (!args?.query) throw new Error("query is required");
+    const params = new URLSearchParams();
+    params.set("query", String(args.query));
+    if (typeof args.limit === "number") params.set("limit", String(args.limit));
+    const mv = normalizeMarketplace(args.marketplace);
+    if (mv) params.set("marketplace", mv);
+    const result = await callGateway(
+      `/v1/marketplace/resources/search?${params.toString()}`,
+      undefined,
+      "GET"
+    );
+    decorateMarketplaceUrls(result);
+    return result;
   }
 };
 

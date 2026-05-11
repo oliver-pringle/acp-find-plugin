@@ -67,6 +67,7 @@ const EXPECTED_TOOLS = [
   "acp_agent_recent_jobs",
   "acp_agent_reputation",
   "acp_agent_reputation_history",
+  "acp_agent_resources",
   "acp_browse_agent",
   "acp_categories",
   "acp_compare_agents",
@@ -75,6 +76,7 @@ const EXPECTED_TOOLS = [
   "acp_health",
   "acp_offering",
   "acp_recent_hires",
+  "acp_resources_search",
   "acp_search_agents",
   "acp_today",
   "acp_watch_status"
@@ -103,7 +105,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 14 tools with required schemas", async () => {
+test("tools/list returns all 16 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({

@@ -2,6 +2,29 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## 0.8.0 — drafted 2026-05-11 (unreleased — R7-IDEA-C)
+
+ACP v2 Resources marketplace-wide discovery. Pairs with R7-IDEA-A (every portfolio bot now registers Resources) and extends TheMetaBot's V2 indexer to mirror them.
+
+### Added
+
+- **2 new MCP tools** (14 → 16):
+  - `acp_agent_resources` — list one agent's indexed Resources by wallet address.
+  - `acp_resources_search` — cross-agent search across name + description + agent name. Use to discover agents by the FREE pre-hire introspection surface they expose.
+
+### Backend (TheMetaBot)
+
+- New `agent_resources` SQLite table mirroring `AcpAgentResource` (name + url + params + description) per indexed V2 agent.
+- `AcpV2MarketplaceSource` writes resources as a side-effect of its per-wallet fetch — no change to the `IMarketplaceSource` contract.
+- Two new HTTP endpoints on the public gateway:
+  - `GET /v1/agent/{address}/resources` — per-agent list (sits alongside the existing `/v1/agent/{address}` browse endpoint).
+  - `GET /v1/marketplace/resources/search?query=...&limit=...&marketplace=...` — cross-agent substring search.
+- Both endpoints rate-limited at 120/IP/hr via the new `public-marketplace-resources` policy.
+
+### Backward compatibility
+
+- All changes are **additive** — no existing tools, fields, or routes were modified or removed.
+
 ## 0.5.0 — 2026-05-03
 
 Largest release since v0.4.0 introduced V1+V2 cross-version search.
