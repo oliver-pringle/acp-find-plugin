@@ -27,7 +27,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (16)
+## Tools (18)
 
 ### Search & discovery
 
@@ -69,6 +69,13 @@ ACP v2 has a first-class **Resources** primitive (`AcpAgentResource`: `{ name, u
 |---|---|---|
 | `acp_agent_resources` | `agentAddress` | Per-agent list of indexed Resources (name, url, params schema, description, marketplace version, first/last seen). Returns empty list when the agent has none. |
 | `acp_resources_search` | `query`, `limit?` (1-100, default 25), `marketplace?` (`v1`/`v2`) | Substring search across name + description + agent name. Use to discover agents by the FREE pre-hire surface they expose (e.g. "find agents with a `tradingStatusCheck` resource"). |
+| `acp_resource_call` | `agentAddress`, `resourceName`, `params?` | INVOKE a specific Resource by calling its registered URL. Looks up the URL via Metabot's index (leg 1, gateway), then forwards the call directly to the agent's bot (leg 2, public Internet — no X-API-Key). Returns the agent's JSON response (or `rawText` for non-JSON), wrapped with `{ agentAddress, resourceName, url, fetchedAt, response }`. 30s timeout per call. Errors when the agent isn't indexed, the Resource name doesn't exist, or the agent's bot is unreachable. Resources are public — no payment, no hire. |
+
+### Stack cost projection
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_estimate_stack_cost` | `items[]` (each: `priceUsd`, `priceType?` / `type?`, `usesPerMonth?`, `durationDays?`, plus optional `agentAddress` / `offeringName` for legibility), `budgetUsdMonthly?` | Pure calculation — no network. One-shot rows: `monthly = priceUsd × usesPerMonth` (default 1). Subscription rows: `monthly = priceUsd × 30 / durationDays` (default 30). Response includes `totalUsdMonthly`, per-item `breakdown`, and (when `budgetUsdMonthly` is set) `withinBudget`, `remainingBudgetUsdMonthly`, `overBudgetUsdMonthly`. Use after `acp_compose_stack` to roll the whole stack into a monthly burn. |
 
 ### Operations
 

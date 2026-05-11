@@ -72,10 +72,12 @@ const EXPECTED_TOOLS = [
   "acp_categories",
   "acp_compare_agents",
   "acp_compose_stack",
+  "acp_estimate_stack_cost",
   "acp_find",
   "acp_health",
   "acp_offering",
   "acp_recent_hires",
+  "acp_resource_call",
   "acp_resources_search",
   "acp_search_agents",
   "acp_today",
@@ -105,7 +107,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 16 tools with required schemas", async () => {
+test("tools/list returns all 18 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -173,6 +175,68 @@ test("acp_compare_agents validates address shape", async () => {
     });
     assert.equal(r.result.isError, true);
     assert.match(r.result.content[0].text, /invalid wallet address/i);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_estimate_stack_cost rolls one-shot + subscription items into monthly total", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: {
+        name: "acp_estimate_stack_cost",
+        arguments: {
+          items: [
+            // $0.01 × 100 = $1.00/mo
+            { offeringName: "search", priceUsd: 0.01, priceType: "one_shot", usesPerMonth: 100 },
+            // $5 / 7d = $21.43/mo
+            { offeringName: "vrf_audit_pack", priceUsd: 5.0, priceType: "subscription", durationDays: 7 },
+            // $50/30d = $50/mo
+            { offeringName: "macro_treasury", priceUsd: 50.0, priceType: "subscription", durationDays: 30 }
+          ],
+          budgetUsdMonthly: 100
+        }
+      }
+    });
+    assert.equal(r.result.isError, undefined);
+    const parsed = JSON.parse(r.result.content[0].text);
+    // 1 + 21.428571… + 50 ≈ 72.43
+    assert.ok(parsed.totalUsdMonthly > 72 && parsed.totalUsdMonthly < 73,
+      `expected total ~72.43, got ${parsed.totalUsdMonthly}`);
+    assert.equal(parsed.withinBudget, true);
+    assert.equal(parsed.breakdown.length, 3);
+    assert.equal(parsed.breakdown[0].monthlyUsd, 1);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_resource_call requires agentAddress and resourceName", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r1 = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_resource_call", arguments: { resourceName: "searchStatus" } }
+    });
+    assert.equal(r1.result.isError, true);
+    assert.match(r1.result.content[0].text, /agentAddress is required/);
+
+    const r2 = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "acp_resource_call", arguments: { agentAddress: "0xabc" } }
+    });
+    assert.equal(r2.result.isError, true);
+    assert.match(r2.result.content[0].text, /resourceName is required/);
   } finally {
     conn.close();
   }

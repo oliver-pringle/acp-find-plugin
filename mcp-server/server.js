@@ -571,6 +571,61 @@ const TOOLS = [
       },
       required: ["query"]
     }
+  },
+  {
+    name: "acp_resource_call",
+    description:
+      "Invoke a specific Resource on an agent by calling its registered URL. Resources are free, public HTTP endpoints — this tool first looks up the URL via Metabot's index (the same data acp_agent_resources / acp_resources_search return), then forwards the call directly to the agent's bot. Use AFTER acp_agent_resources or acp_resources_search has identified the Resource you want. Returns the agent's JSON response (or rawText for non-JSON). Resources are public — no API key, no payment. 30s timeout per call. Errors if the agent isn't indexed by Metabot, has no Resource by that name, or the agent's bot is unreachable.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        },
+        resourceName: {
+          type: "string",
+          description: "Name of the Resource as registered on the marketplace (e.g. 'searchStatus', 'feedCatalogue', 'tradingStatusCheck'). Case-sensitive."
+        },
+        params: {
+          type: "object",
+          description: "Optional key/value pairs sent as query string. Values are stringified; objects are JSON-stringified. Resources are GET-only; if a Resource needs a POST body, this tool won't reach it (rare in v2)."
+        }
+      },
+      required: ["agentAddress", "resourceName"]
+    }
+  },
+  {
+    name: "acp_estimate_stack_cost",
+    description:
+      "Roll up the projected monthly cost of a stack of ACP offerings. Use after acp_compose_stack or when the user has hand-picked a set of offerings and asks 'what does this cost me per month?'. One-shot offerings: monthlyUsd = priceUsd × usesPerMonth (defaults to 1 if not specified). Subscription offerings: monthlyUsd = priceUsd × 30 / durationDays (defaults to 30-day tier). Includes a budget check when budgetUsdMonthly is supplied. Pure calculation — no network calls, no fetch from the marketplace; caller passes the price data inline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description: "Stack items to project. Each item carries the priceUsd + priceType from whichever discovery tool surfaced it (acp_compose_stack, acp_offering, acp_find).",
+          items: {
+            type: "object",
+            properties: {
+              agentAddress: { type: "string", description: "Optional. Surfaced in the breakdown for legibility." },
+              offeringName: { type: "string", description: "Optional. Surfaced in the breakdown for legibility." },
+              priceUsd:    { type: "number", description: "Price per call (one-shot) or per tier period (subscription). REQUIRED." },
+              priceType:   { type: "string", enum: ["one_shot", "subscription"], description: "Costing model. Subscription rows must also set durationDays." },
+              type:        { type: "string", enum: ["one_shot", "subscription"], description: "Alias for priceType. Use whichever the discovery tool provided." },
+              usesPerMonth:  { type: "number", description: "One-shot only. Expected calls per month. Defaults to 1." },
+              durationDays:  { type: "number", description: "Subscription only. Days the priceUsd covers. Defaults to 30." }
+            },
+            required: ["priceUsd"]
+          }
+        },
+        budgetUsdMonthly: {
+          type: "number",
+          description: "Optional. If set, response includes withinBudget + remainingBudgetUsdMonthly so the LLM can recommend adjustments."
+        }
+      },
+      required: ["items"]
+    }
   }
 ];
 
@@ -870,7 +925,163 @@ const HANDLERS = {
     );
     decorateMarketplaceUrls(result);
     return result;
-  }
+  },
+
+  // Invokes a specific Resource on an agent. Two network legs:
+  //   1. Look up the registered URL via Metabot's /v1/agent/<addr>/resources
+  //   2. GET that URL with caller params as query string
+  // The second leg goes DIRECTLY to the agent's bot, not through Metabot —
+  // Resources are public so we don't need to round-trip through our gateway.
+  // No X-API-Key is sent on leg 2 (third-party bots wouldn't recognise ours).
+  acp_resource_call: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    if (!args?.resourceName) throw new Error("resourceName is required");
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const name = String(args.resourceName).trim();
+    const params = args.params && typeof args.params === "object" ? args.params : {};
+
+    // Leg 1 — look up the URL via Metabot's index.
+    const indexResp = await callGateway(
+      `/v1/agent/${encodeURIComponent(addr)}/resources`,
+      undefined,
+      "GET"
+    );
+    const list = indexResp?.resources ?? [];
+    const resource = list.find((r) => r?.name === name);
+    if (!resource) {
+      const available = list.map((r) => r?.name).filter(Boolean).join(", ") || "(none indexed)";
+      throw new Error(
+        `Agent ${addr} has no resource named "${name}". Available: ${available}. ` +
+          "Try acp_agent_resources or acp_resources_search to discover available resources."
+      );
+    }
+    if (!resource.url) {
+      throw new Error(`Resource "${name}" has no registered URL.`);
+    }
+
+    let callUrl;
+    try {
+      callUrl = new URL(resource.url);
+    } catch {
+      throw new Error(`Resource "${name}" has an invalid URL: ${resource.url}`);
+    }
+    for (const [k, v] of Object.entries(params)) {
+      if (v == null) continue;
+      callUrl.searchParams.set(
+        k,
+        typeof v === "object" ? JSON.stringify(v) : String(v)
+      );
+    }
+
+    // Leg 2 — direct call. Reuse the same timeout the gateway uses.
+    logVerbose(`→ resource call ${name} on ${addr}: ${callUrl.toString()}`);
+    let resp;
+    try {
+      resp = await fetch(callUrl.toString(), {
+        method: "GET",
+        headers: { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      throw new Error(
+        `Resource call to ${callUrl.toString()} failed: ${err.message}`
+      );
+    }
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      throw new Error(
+        `Resource "${name}" returned ${resp.status} ${resp.statusText}: ${body.slice(0, 500)}`
+      );
+    }
+
+    const ctype = (resp.headers.get("content-type") || "").toLowerCase();
+    const response = ctype.includes("application/json")
+      ? await resp.json()
+      : { rawText: await resp.text() };
+
+    return {
+      agentAddress: addr,
+      resourceName: name,
+      url: callUrl.toString(),
+      fetchedAt: new Date().toISOString(),
+      response,
+    };
+  },
+
+  // Pure calculation — rolls a list of priced offerings into a monthly cost.
+  // No network. Caller passes prices inline (typically copied from
+  // acp_compose_stack output). One-shot rows multiply price × usesPerMonth;
+  // subscription rows scale priceUsd by 30/durationDays so a $5 / 7d tier
+  // shows up as $21.43/mo. Budget check is opt-in via budgetUsdMonthly.
+  acp_estimate_stack_cost: async (args) => {
+    if (!Array.isArray(args?.items)) throw new Error("items[] is required");
+    const budget =
+      typeof args.budgetUsdMonthly === "number" && Number.isFinite(args.budgetUsdMonthly)
+        ? args.budgetUsdMonthly
+        : null;
+
+    let total = 0;
+    const breakdown = args.items.map((item, idx) => {
+      const priceUsd =
+        typeof item?.priceUsd === "number"
+          ? item.priceUsd
+          : parseFloat(item?.priceUsd);
+      if (!Number.isFinite(priceUsd) || priceUsd < 0) {
+        throw new Error(
+          `items[${idx}].priceUsd must be a non-negative number; got ${item?.priceUsd}`
+        );
+      }
+      const priceType = item?.priceType ?? item?.type ?? "one_shot";
+      const isSubscription = priceType === "subscription";
+
+      let monthlyUsd;
+      let costModel;
+      if (isSubscription) {
+        const days =
+          typeof item?.durationDays === "number" && item.durationDays > 0
+            ? item.durationDays
+            : 30;
+        monthlyUsd = priceUsd * (30 / days);
+        costModel = `$${priceUsd}/${days}d → $${monthlyUsd.toFixed(4)}/mo`;
+      } else {
+        const uses =
+          typeof item?.usesPerMonth === "number" && item.usesPerMonth >= 0
+            ? item.usesPerMonth
+            : 1;
+        monthlyUsd = priceUsd * uses;
+        costModel = `$${priceUsd}/call × ${uses} uses/mo → $${monthlyUsd.toFixed(4)}/mo`;
+      }
+      total += monthlyUsd;
+
+      return {
+        agentAddress: item?.agentAddress ?? null,
+        offeringName: item?.offeringName ?? null,
+        priceUsd,
+        priceType: isSubscription ? "subscription" : "one_shot",
+        usesPerMonth: isSubscription ? null : (item?.usesPerMonth ?? 1),
+        durationDays: isSubscription ? (item?.durationDays ?? 30) : null,
+        monthlyUsd: Number(monthlyUsd.toFixed(6)),
+        costModel,
+      };
+    });
+
+    const totalRounded = Number(total.toFixed(2));
+    return {
+      totalUsdMonthly: totalRounded,
+      breakdown,
+      budgetUsdMonthly: budget,
+      withinBudget: budget == null ? null : totalRounded <= budget,
+      remainingBudgetUsdMonthly:
+        budget == null ? null : Number((budget - totalRounded).toFixed(2)),
+      overBudgetUsdMonthly:
+        budget == null ? null : Math.max(0, Number((totalRounded - budget).toFixed(2))),
+      notes: [
+        "One-shot: monthly = priceUsd × usesPerMonth (default 1).",
+        "Subscription: monthly = priceUsd × 30 / durationDays (default 30).",
+        "Set usesPerMonth per one-shot item for accurate projections.",
+      ],
+    };
+  },
 };
 
 async function dispatchTool(name, args) {

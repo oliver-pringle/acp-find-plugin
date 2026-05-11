@@ -2,24 +2,34 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
-## 0.8.0 — drafted 2026-05-11 (unreleased — R7-IDEA-C)
+## 0.8.0 — drafted 2026-05-11 (unreleased — R7-IDEA-C + Resources end-to-end + cost projection)
 
-ACP v2 Resources marketplace-wide discovery. Pairs with R7-IDEA-A (every portfolio bot now registers Resources) and extends TheMetaBot's V2 indexer to mirror them.
+Closes the ACP v2 Resources loop end-to-end (discover → invoke) and adds a calculation-only stack cost projector.
 
 ### Added
 
-- **2 new MCP tools** (14 → 16):
-  - `acp_agent_resources` — list one agent's indexed Resources by wallet address.
-  - `acp_resources_search` — cross-agent search across name + description + agent name. Use to discover agents by the FREE pre-hire introspection surface they expose.
+- **4 new MCP tools** (14 → 18):
+  - `acp_agent_resources` — list one agent's indexed Resources by wallet address (R7-IDEA-C).
+  - `acp_resources_search` — cross-agent search across name + description + agent name. Use to discover agents by the FREE pre-hire introspection surface they expose (R7-IDEA-C).
+  - `acp_resource_call` — INVOKE a Resource. Looks up the registered URL via Metabot's index, then calls it directly. Returns the agent's JSON response (or rawText). Closes the loop: discovery → invocation, no payment, no hire.
+  - `acp_estimate_stack_cost` — pure calculation, no network. Rolls a list of priced offerings into a projected monthly cost. One-shot: `priceUsd × usesPerMonth`. Subscription: `priceUsd × 30 / durationDays`. Optional `budgetUsdMonthly` check.
+- **3 new slash commands:**
+  - `/acp-find:resources <addr | query>` — auto-routes to `acp_agent_resources` (for addresses) or `acp_resources_search` (for free-text).
+  - `/acp-find:resource-call <agent> <resource> [params]` — wraps `acp_resource_call`, accepts JSON / `k=v` / `addr/name` shorthands.
+  - `/acp-find:cost` — wraps `acp_estimate_stack_cost`, pairs naturally with `/acp-find:stack`.
 
 ### Backend (TheMetaBot)
 
 - New `agent_resources` SQLite table mirroring `AcpAgentResource` (name + url + params + description) per indexed V2 agent.
 - `AcpV2MarketplaceSource` writes resources as a side-effect of its per-wallet fetch — no change to the `IMarketplaceSource` contract.
 - Two new HTTP endpoints on the public gateway:
-  - `GET /v1/agent/{address}/resources` — per-agent list (sits alongside the existing `/v1/agent/{address}` browse endpoint).
+  - `GET /v1/agent/{address}/resources` — per-agent list (sits alongside the existing `/v1/agent/{address}` browse endpoint). Used by both `acp_agent_resources` AND `acp_resource_call` (the latter pulls the URL from here before forwarding to the agent's bot).
   - `GET /v1/marketplace/resources/search?query=...&limit=...&marketplace=...` — cross-agent substring search.
 - Both endpoints rate-limited at 120/IP/hr via the new `public-marketplace-resources` policy.
+
+### Plugin transport
+
+- `acp_resource_call` does a two-leg fetch: leg 1 (the URL lookup) goes through Metabot's gateway with X-API-Key; leg 2 (the actual Resource call) goes DIRECT to the agent's bot with no API key (third-party bots wouldn't recognise ours). Both legs use `REQUEST_TIMEOUT_MS` (30s).
 
 ### Backward compatibility
 

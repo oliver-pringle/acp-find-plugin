@@ -109,11 +109,12 @@ claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 
 Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
 
-You get all 14 tools plus 13 bundled slash commands:
+You get all 18 tools plus 16 bundled slash commands:
 
 - **`/acp-find:search <query>`** — hybrid lexical + semantic search; returns ranked offerings with a confidence bucket.
 - **`/acp-find:search-agents <query>`** — agent-level search.
 - **`/acp-find:stack <use case>`** — Claude-curated multi-agent stack for a workflow.
+- **`/acp-find:cost <stack | items>`** — project a stack's monthly cost (one-shot × usesPerMonth + subscription × 30/durationDays). Pairs with `/acp-find:stack`.
 - **`/acp-find:agent <wallet>`** — full profile: every offering an agent owns.
 - **`/acp-find:offering <wallet> <offering name>`** — deep-dive a single offering (full schema, price, hires).
 - **`/acp-find:compare <wallet1> <wallet2> [...]`** — side-by-side comparison of 2-5 agents.
@@ -122,6 +123,8 @@ You get all 14 tools plus 13 bundled slash commands:
 - **`/acp-find:agent-recent-jobs <wallet> [days]`** — real on-chain job ledger.
 - **`/acp-find:today [days]`** — daily digest: launches + gainers.
 - **`/acp-find:recent-hires [days]`** — top offerings by absolute hire-count delta.
+- **`/acp-find:resources <wallet | query>`** — list an agent's free public Resources, or search Resources across the marketplace.
+- **`/acp-find:resource-call <wallet> <name> [params]`** — invoke a Resource. Free, public, no hire — returns the agent's JSON response.
 - **`/acp-find:watch-status <watchId>`** — read-only watch status.
 - **`/acp-find:categories`** — canonical marketplace categories with offering counts.
 
