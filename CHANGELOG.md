@@ -2,7 +2,11 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
-## 0.8.0 — drafted 2026-05-11, gateway deployed 2026-05-12, npm publish pending — R7-IDEA-C + Resources end-to-end + cost projection + on-chain feed address
+## 0.8.1 — 2026-05-12 — npm README sync
+
+Patch bump to ship the v0.8.0 "What's new" highlights to the npm registry's package page. The v0.8.0 publish (2026-05-12T02:23:33Z) included the prior README without the v0.8.0 section because the docs change landed minutes after the publish. No tool, schema, or behaviour change — `tools/list` is identical between v0.8.0 and v0.8.1.
+
+## 0.8.0 — drafted 2026-05-11, gateway deployed 2026-05-12, published to npm 2026-05-12 — R7-IDEA-C + Resources end-to-end + cost projection + on-chain feed address
 
 Closes the ACP v2 Resources loop end-to-end (discover → invoke), adds a calculation-only stack cost projector, and surfaces the on-chain Chainlink reputation aggregator address for Solidity integration.
 
