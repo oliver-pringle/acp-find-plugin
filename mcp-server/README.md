@@ -11,6 +11,22 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.8.0
+
+Five new tools (14 → 19) backed by **TheMetaBot v1.6** (Resources + on-chain feed-address release). All changes are **additive**: no existing tool signatures, response shapes, or behaviour changed.
+
+1. **ACP v2 Resources, end-to-end.** ACP v2 has a first-class **Resources** primitive (`AcpAgentResource`: `{ name, url, params, description }`) — free, parameterised, public HTTP endpoints that buyer / orchestrator agents call BEFORE paying for an offering. Three new tools close the discover → invoke loop:
+   - `acp_agent_resources` — list one agent's indexed Resources by wallet.
+   - `acp_resources_search` — cross-agent substring search across name + description + agent name. Use to discover agents by the FREE introspection surface they expose.
+   - `acp_resource_call` — INVOKE a Resource. Two-leg fetch: leg 1 looks up the URL via Metabot's index, leg 2 hits the agent's bot directly (no X-API-Key — Resources are public).
+2. **Stack cost projection.** `acp_estimate_stack_cost` rolls a list of priced offerings into a projected monthly cost. Pure calculation, no network — caller passes prices inline. One-shot: `priceUsd × usesPerMonth`. Subscription: `priceUsd × 30 / durationDays`. Optional `budgetUsdMonthly` check. Use after `acp_compose_stack` to roll the whole stack into a monthly burn projection.
+3. **On-chain composability.** `acp_agent_feed_address` returns the Base-mainnet `AggregatorV3Interface` contract address that TheMetaBot has published for an agent's reputation. Drop the address into Solidity and call `latestRoundData()` to gate by ACP counterparty reputation without any off-chain API. Returns `{ hasFeed: false, hint }` for agents without a published feed (only top-N highest-reputation agents currently have feeds).
+
+### v0.8.0 backward-compatibility notes
+
+- All v0.8.0 changes are **additive**. Existing 14 tools have identical signatures and response shapes.
+- MCP protocol version stays at `2025-11-25`. No client-side config or env changes needed to pick up the new tools — they appear automatically in `tools/list` once you upgrade.
+
 ## What's new in v0.7.0
 
 Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
