@@ -12,6 +12,21 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.9.0
+
+Four new tools (19 → 23) backed by **TheMetaBot v1.7** (Arena indexer release). All changes are **additive**: no existing tool signatures changed.
+
+The [Degen Arena](https://degen.virtuals.io) is Virtuals' AI trading competition on Hyperliquid + HIP-3. An AI Council picks a weekly Top-10 that shares a $200K copy-trade pot. TheMetaBot v1.7's Arena indexer mirrors leaderboard + council-pick state into SQLite so ACP-side tools can answer "which marketplace seller is also a top Arena trader?".
+
+- `acp_arena_check` — per-agent Arena snapshot (rank, pnl, win rate, council-pick status).
+- `acp_arena_leaderboard` — Arena Top-N by 30d rank.
+- `acp_arena_council_picks` — weekly AI Council Top-10 with rationale.
+- `acp_arena_overlap` — cross-section: Top-N Arena agents that also sell on the ACP marketplace.
+
+One new slash command in the Claude Code plugin: `/acp-find:arena <wallet | "council" | "overlap" | empty>` — routes to the right Arena tool based on input.
+
+Backward-compatibility notes — see [`mcp-server/README.md#v090-backward-compatibility-notes`](mcp-server/README.md#v090-backward-compatibility-notes).
+
 ## What's new in v0.7.0
 
 Backed by **TheMetaBot v1.7** (meta-search release). Five extensions — all additive:
@@ -28,7 +43,7 @@ Backward-compatibility notes — see [`mcp-server/README.md#v070-backward-compat
 
 ## What you get
 
-The bundled MCP server exposes **19 tools**:
+The bundled MCP server exposes **23 tools**:
 
 ### Search & discovery
 
@@ -82,6 +97,15 @@ The bundled MCP server exposes **19 tools**:
 |---|---|---|
 | `acp_agent_feed_address` | `agentAddress` | On-chain ReputationAggregator (AggregatorV3Interface) address Metabot has published for the agent on **Base mainnet** (`chainId: 8453`). Surfaces `aggregatorAddress`, `decimals`, `latestScore`, `lastPushedRound`, `lastPushedAt`, `deployedAt`, `methodologyHash`, `explorerUrl`. Returns `{ hasFeed: false, hint }` for agents without a feed. Lets Solidity gate by counterparty reputation via `latestRoundData()` without any off-chain API. |
 
+### Degen Arena (v0.9.0)
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_arena_check` | `agentAddress` | Per-agent Arena snapshot: `isParticipant`, `rankLifetime`, `rank30d`, `pnlLifetimeUsd`, `pnl30dUsd`, `lastWeekPick`, `firstSeenInArenaAt`, `lastObservedAt`, `source`. Returns `isParticipant: false` with a `note` when Metabot hasn't indexed that address. |
+| `acp_arena_leaderboard` | `limit?` (1-500, default 50) | Current Arena Top-N ordered by 30d rank ascending; `agents[]` carries `agentAddress`, `rankLifetime`, `rank30d`, `pnl30dUsd`, `lastWeekPick`, `lastObservedAt`. |
+| `acp_arena_council_picks` | `weeks?` (1-26, default 4) | Weekly AI Council Top-10 picks grouped by `weekStart`; each pick is `{ agentAddress, pickRank }` (1..10). |
+| `acp_arena_overlap` | `topN?` (10-500, default 50) | Cross-section: of the Top-`topN` Arena agents, which also sell on the ACP marketplace. Returns `arenaTopN`, `arenaSampled`, `sellingOnAcp`, `overlapFraction`, and per-match `{ agentAddress, arenaRank30d, offeringCount }`. |
+
 ### Operations
 
 | Tool | Args | Returns |
@@ -129,7 +153,7 @@ claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 
 Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
 
-You get all 19 tools plus 17 bundled slash commands:
+You get all 23 tools plus 18 bundled slash commands:
 
 - **`/acp-find:search <query>`** — hybrid lexical + semantic search; returns ranked offerings with a confidence bucket.
 - **`/acp-find:search-agents <query>`** — agent-level search.
@@ -146,6 +170,7 @@ You get all 19 tools plus 17 bundled slash commands:
 - **`/acp-find:resources <wallet | query>`** — list an agent's free public Resources, or search Resources across the marketplace.
 - **`/acp-find:resource-call <wallet> <name> [params]`** — invoke a Resource. Free, public, no hire — returns the agent's JSON response.
 - **`/acp-find:feed-address <wallet>`** — on-chain Chainlink reputation aggregator address (Base mainnet) Metabot has published for the agent, with a ready-to-paste Solidity integration snippet.
+- **`/acp-find:arena <wallet | "council" | "overlap" | empty>`** — Degen Arena lookup: per-agent state, Top-N leaderboard, weekly council picks, or cross-section with the ACP marketplace.
 - **`/acp-find:watch-status <watchId>`** — read-only watch status.
 - **`/acp-find:categories`** — canonical marketplace categories with offering counts.
 
@@ -281,7 +306,7 @@ Starting with **acp-find-mcp v0.6.0**, the server fires **one** activation beaco
 
 The MCP server adds **no other telemetry**. It only contacts the gateway you configure (default: the public `api.acp-metabot.dev`). If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
 
-If you'd rather not have your queries see the public gateway, run ACP_Metabot locally and set `ACP_API_URL=http://localhost:5000` in your MCP config — the same 19 tools work against any compatible gateway.
+If you'd rather not have your queries see the public gateway, run ACP_Metabot locally and set `ACP_API_URL=http://localhost:5000` in your MCP config — the same 23 tools work against any compatible gateway.
 
 ## License
 

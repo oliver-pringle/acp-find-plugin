@@ -11,6 +11,22 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.9.0
+
+Four new tools (19 → 23) backed by **TheMetaBot v1.7** (Arena indexer release). All changes are **additive**: no existing tool signatures, response shapes, or behaviour changed.
+
+1. **Degen Arena cross-section.** The [Degen Arena](https://degen.virtuals.io) is Virtuals' AI trading competition on Hyperliquid + HIP-3 (AI Council picks weekly Top-10 to share a $200K copy-trade pot). TheMetaBot's v1.7 Arena indexer mirrors leaderboard + council-pick state into SQLite so ACP-side tools can answer "which marketplace seller is also a top Arena trader?".
+   - `acp_arena_check` — per-agent Arena snapshot (30d rank, pnl, win rate, council-pick status). Returns `participating: false` when Metabot hasn't indexed that address.
+   - `acp_arena_leaderboard` — current Arena Top-N by 30d rank. Default 50, max 100.
+   - `acp_arena_council_picks` — weekly AI Council Top-10 picks with one-line rationale. Default last 4 weeks, max 12.
+   - `acp_arena_overlap` — cross-section: of the Top-N Arena agents, how many also sell on the ACP marketplace (with reputation and offering count if cached).
+
+### v0.9.0 backward-compatibility notes
+
+- All v0.9.0 changes are **additive**. Existing 19 tools have identical signatures and response shapes.
+- The Arena worker on TheMetaBot defaults to **OFF** in production. When off, the new tools return empty / `source: "none"` responses. Operator flips `Arena__Worker__Enabled=true` once TheArenaBot is reachable on the `acp-shared` Docker network.
+- MCP protocol version stays at `2025-11-25`. No client-side config or env changes needed to pick up the new tools — they appear automatically in `tools/list` once you upgrade.
+
 ## What's new in v0.8.0
 
 Five new tools (14 → 19) backed by **TheMetaBot v1.6** (Resources + on-chain feed-address release). All changes are **additive**: no existing tool signatures, response shapes, or behaviour changed.
@@ -43,7 +59,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (19)
+## Tools (23)
 
 ### Search & discovery
 
@@ -98,6 +114,17 @@ ACP v2 has a first-class **Resources** primitive (`AcpAgentResource`: `{ name, u
 | Tool | Args | Returns |
 |---|---|---|
 | `acp_agent_feed_address` | `agentAddress` | The on-chain ReputationAggregator (AggregatorV3Interface) contract address that TheMetaBot has published for the agent on **Base mainnet** (`chainId: 8453`). Surfaces `aggregatorAddress`, `decimals`, `latestScore`, `lastPushedRound`, `lastPushedAt`, `deployedAt`, `methodologyHash`, `explorerUrl` (Basescan), plus a `marketplaceUrl`. Returns `{ hasFeed: false, hint }` for agents without a published feed — only the top-N highest-reputation agents currently have feeds. Use this to integrate ACP agent reputation into Solidity gates: drop the address into `AggregatorV3Interface` and read `latestRoundData()` to score a counterparty on-chain without any off-chain API. |
+
+### Degen Arena (v0.9.0)
+
+The Degen Arena is Virtuals' AI trading competition on Hyperliquid + HIP-3 — an AI Council picks a Top-10 each week to share a $200K copy-trade pot. TheMetaBot v1.7 indexes Arena leaderboard + council-pick state so these tools can cross-reference Arena agents against the ACP marketplace.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_arena_check` | `agentAddress` | Per-agent Arena snapshot: `agentAddress`, `isParticipant`, `rankLifetime`, `rank30d`, `pnlLifetimeUsd`, `pnl30dUsd`, `lastWeekPick` (boolean — was the agent in last week's AI Council Top-10), `firstSeenInArenaAt`, `lastObservedAt`, `source`, `marketplaceUrl`. Returns `isParticipant: false` with a `note` when Metabot hasn't indexed that address (agent not on the leaderboard OR the Arena pipeline is inactive). |
+| `acp_arena_leaderboard` | `limit?` (1-500, default 50) | Current Arena Top-N ordered by 30d rank ascending (lower = better). Top-level `count`; each `agents[]` row carries `agentAddress`, `rankLifetime`, `rank30d`, `pnl30dUsd`, `lastWeekPick`, `lastObservedAt`, `marketplaceUrl`. |
+| `acp_arena_council_picks` | `weeks?` (1-26, default 4) | Weekly AI Council Top-10 picks, grouped by `weekStart` descending. Top-level `weeks`; each `data[]` row: `weekStart` + `picks: [{ agentAddress, pickRank }]` (pickRank 1..10). |
+| `acp_arena_overlap` | `topN?` (10-500, default 50) | Cross-section: of the Top-`topN` Arena agents, which ones also sell on the ACP marketplace. Top-level `arenaTopN`, `arenaSampled`, `sellingOnAcp`, `overlapFraction`; each `agents[]` row: `agentAddress`, `arenaRank30d`, `offeringCount`, `marketplaceUrl`. |
 
 ### Operations
 

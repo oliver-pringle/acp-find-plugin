@@ -641,6 +641,63 @@ const TOOLS = [
       },
       required: ["agentAddress"]
     }
+  },
+  {
+    name: "acp_arena_check",
+    description:
+      "Look up a single ACP agent's Degen Arena (degen.virtuals.io) state. Returns isParticipant + ranks (lifetime + 30d) + lifetime + 30d PnL + lastWeekPick flag + first-seen timestamp. Cached by Metabot's ArenaSourceWorker on a 15-min cadence from ArenaBot's free Resources. Use BEFORE paying for ArenaBot's deeper `arena_agent_report` — this tells you whether the agent is an Arena participant at all and at what rank. Returns isParticipant=false for agents not on the leaderboard, OR when Metabot's Arena pipeline is inactive (the cross-bot ArenaSourceWorker is OFF by default; check `acp_health` or `arenaParticipantCount` Resource for system-wide state).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed 40-hex). Lower- or mixed-case is fine."
+        }
+      },
+      required: ["agentAddress"]
+    }
+  },
+  {
+    name: "acp_arena_leaderboard",
+    description:
+      "Returns Metabot's indexed Degen Arena leaderboard, ordered by past-30-day rank ascending (lowest rank = best performer). Each entry includes the agent address, current lifetime + 30d ranks, 30d PnL, last-week AI Council pick flag, and last-observed timestamp. Use when the user asks 'who's winning on Degen', 'show me the top Arena agents', or wants to feed a downstream search by overlapping with marketplace presence (see `acp_arena_overlap`). Returns { count, agents[] }. Empty (count=0) until Metabot's Arena pipeline is enabled.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "number",
+          description: "Max agents to return (1-500). Defaults to 50."
+        }
+      }
+    }
+  },
+  {
+    name: "acp_arena_council_picks",
+    description:
+      "Returns the Degen Arena AI Council's weekly Top-10 picks for the $200K copy-trade pot. Groups by weekStart (Monday 16:30 UTC selection time, per dgclaw-skill docs). Each pick row contains agentAddress + pickRank (1..10). Use when the user asks 'who got picked this week on Arena', 'show me Arena Council history', or to track who's consistently getting selected by the LLM jury. Sourced from Metabot's cached council picks table — empty until the Arena pipeline is enabled AND at least one Monday has passed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        weeks: {
+          type: "number",
+          description: "How many recent weeks to include (1-26). Defaults to 4."
+        }
+      }
+    }
+  },
+  {
+    name: "acp_arena_overlap",
+    description:
+      "Cross-section: of the Top-N Degen Arena agents indexed by Metabot, how many ALSO sell ACP offerings on app.virtuals.io? Returns { arenaTopN, arenaSampled, sellingOnAcp, overlapFraction, agents[] } where each match row has the agent's address, current Arena 30d rank, and ACP offering count. High overlapFraction is a strong buyer-side signal: traders winning real money on Arena who also sell services on ACP are credentialed sellers. Empty (overlapFraction=0) until Metabot's Arena pipeline is enabled.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topN: {
+          type: "number",
+          description: "How many Arena Top-N agents to sample for the overlap (10-500). Defaults to 50."
+        }
+      }
+    }
   }
 ];
 
@@ -1137,6 +1194,126 @@ const HANDLERS = {
         "Set usesPerMonth per one-shot item for accurate projections.",
       ],
     };
+  },
+
+  // ===== v0.9.0 Degen Arena tools =====
+  // Wrap the v1.7 Arena endpoints on api.acp-metabot.dev. All four are
+  // pure GET wrappers — no auth, no payment. Empty responses until
+  // Metabot's ArenaSourceWorker is enabled (Arena__BaseUrl + Arena__Worker__Enabled).
+
+  acp_arena_check: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    if (!isHexAddress(args.agentAddress)) {
+      throw new Error("agentAddress must be 0x followed by 40 hex chars");
+    }
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const url = `${API_URL}/v1/agent/${encodeURIComponent(addr)}/arena`;
+    const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    const startedAt = Date.now();
+    logVerbose(`→ GET /v1/agent/${addr}/arena`);
+    const res = await fetchWithRetry(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    logVerbose(`← GET /v1/agent/${addr}/arena ${res.status} (${Date.now() - startedAt}ms)`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `/v1/agent/${addr}/arena returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`
+      );
+    }
+    const json = await res.json();
+    json.marketplaceUrl = agentUrl(addr);
+    return json;
+  },
+
+  acp_arena_leaderboard: async (args) => {
+    const limit =
+      typeof args?.limit === "number" && args.limit > 0
+        ? Math.min(500, Math.max(1, Math.floor(args.limit)))
+        : 50;
+    const url = `${API_URL}/v1/arena/agents?limit=${limit}`;
+    const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    const startedAt = Date.now();
+    logVerbose(`→ GET /v1/arena/agents?limit=${limit}`);
+    const res = await fetchWithRetry(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    logVerbose(`← GET /v1/arena/agents ${res.status} (${Date.now() - startedAt}ms)`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `/v1/arena/agents returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`
+      );
+    }
+    const json = await res.json();
+    if (Array.isArray(json?.agents)) {
+      for (const a of json.agents) {
+        if (a?.agentAddress) a.marketplaceUrl = agentUrl(a.agentAddress);
+      }
+    }
+    return json;
+  },
+
+  acp_arena_council_picks: async (args) => {
+    const weeks =
+      typeof args?.weeks === "number" && args.weeks > 0
+        ? Math.min(26, Math.max(1, Math.floor(args.weeks)))
+        : 4;
+    const url = `${API_URL}/v1/arena/council-picks?weeks=${weeks}`;
+    const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    const startedAt = Date.now();
+    logVerbose(`→ GET /v1/arena/council-picks?weeks=${weeks}`);
+    const res = await fetchWithRetry(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    logVerbose(`← GET /v1/arena/council-picks ${res.status} (${Date.now() - startedAt}ms)`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `/v1/arena/council-picks returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`
+      );
+    }
+    return await res.json();
+  },
+
+  acp_arena_overlap: async (args) => {
+    const topN =
+      typeof args?.topN === "number" && args.topN > 0
+        ? Math.min(500, Math.max(10, Math.floor(args.topN)))
+        : 50;
+    const url = `${API_URL}/v1/marketplace-overlap?topN=${topN}`;
+    const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    const startedAt = Date.now();
+    logVerbose(`→ GET /v1/marketplace-overlap?topN=${topN}`);
+    const res = await fetchWithRetry(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    logVerbose(`← GET /v1/marketplace-overlap ${res.status} (${Date.now() - startedAt}ms)`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `/v1/marketplace-overlap returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`
+      );
+    }
+    const json = await res.json();
+    if (Array.isArray(json?.agents)) {
+      for (const a of json.agents) {
+        if (a?.agentAddress) a.marketplaceUrl = agentUrl(a.agentAddress);
+      }
+    }
+    return json;
   },
 };
 
