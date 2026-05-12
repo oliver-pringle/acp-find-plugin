@@ -1,6 +1,6 @@
 {
   "name": "acp-find",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace (V1 + V2). Helps you discover on-chain agents and offerings without leaving Claude Code.",
   "author": {
     "name": "Oliver Pringle",
