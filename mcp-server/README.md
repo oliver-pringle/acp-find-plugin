@@ -11,21 +11,37 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
-## Tools (14)
+## What's new in v0.7.0
+
+Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
+
+1. **Hybrid agent search** — `acp_search_agents` now uses BM25 + dense + Voyage rerank, so it picks up synonyms and paraphrase that the old keyword-only engine missed. `agentScore` is post-rerank cosine (higher = more relevant); treat as opaque rank signal.
+2. **V1/V2 cross-presence** — `acp_browse_agent` gains a `crossPresence` block (offeringCount per marketplace, `dominantMarketplace`). Each offering also gains `pricePercentile`.
+3. **Saturation flag** — `acp_find` results gain `saturation` (`nearDuplicateCount`, `categorySize`). `nearDuplicateCount > 3` usually means a crowded niche.
+4. **Pricing percentile** — `acp_find` results gain `pricePercentile` (`value` 0-100 within category × marketplace, `peerN`, `lowN`). Near-100 with `peerN ≥ 5` means premium pricing for that category.
+5. **Marketplace pulse** — `acp_today` gains new response fields (`newAgents`, `churnRate`, `cohortSurvival`, `saturationMap`, `partial`) and expands `days` max from 30 to 90.
+
+### v0.7.0 backward-compatibility notes
+
+- **`acp_search_agents` `agentScore`** semantics have changed: was BM25 raw (lower ≈ better), now post-rerank cosine (higher = better). Treat as opaque; do not compare scores across versions.
+- **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
+- All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
+
+## Tools (19)
 
 ### Search & discovery
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`) and `marketplaceUrl`. Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
-| `acp_search_agents` | `query`, `limit?`, `marketplace?` | Agent-level search (vs offering-level `acp_find`). |
+| `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`), `marketplaceUrl`, **`saturation`** (`nearDuplicateCount`, `categorySize`), and **`pricePercentile`** (`value`, `peerN`, `lowN`). Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
+| `acp_search_agents` | `query`, `limit?`, `marketplace?` | Agent-level hybrid search (BM25 + dense + Voyage rerank). Response key is `agents`. Each agent gains **`marketplaces`** (array), **`dominantMarketplace`**, **`agentScore`** (post-rerank cosine, higher = better), **`topOfferings`** (records: `offeringName`, `priceUsdc`, `marketplaceVersion`), **`topOfferingNames`** (names-only mirror). |
 | `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?`, `chain?`, `marketplace?` | Curated multi-agent stack with rationale. |
 
 ### Agent / offering deep-dive
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_browse_agent` | `agentAddress` | Full agent profile: every offering with descriptions, schemas, prices, per-offering reputation. |
+| `acp_browse_agent` | `agentAddress` | Full agent profile: every offering with descriptions, schemas, prices, per-offering reputation and **`pricePercentile`**. Top-level **`crossPresence`** block: `{ v1: { offeringCount }, v2: { offeringCount }, dominantMarketplace }`. |
 | `acp_offering` | `agentAddress`, `offeringName` | Single-offering deep-dive — full description, requirement schema, price, lifetime hires. |
 | `acp_compare_agents` | `agentAddresses` (2-5) | Side-by-side comparison: offerings count, summary reputation, behavioural reputation per agent. |
 
@@ -41,9 +57,31 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_today` | `days?` (default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Daily digest: launches and biggest hire-count gainers in the window. |
+| `acp_today` | `days?` (1-90, default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Marketplace pulse digest: launches, gainers, plus **`newAgents`** (agent inflow), **`churnRate`** (fraction gone inactive), **`cohortSurvival`** (null when days < 30), **`saturationMap`** (per-category density), **`partial`** (true when window crosses a data gap). |
 | `acp_recent_hires` | `days?` (default 7), `limit?`, `category?`, `chain?`, `priceMaxUsdc?`, `marketplace?` | Top offerings by absolute hire-count delta. |
 | `acp_categories` | — | Canonical marketplace categories with `offeringCount` per category. Cached 5 min. |
+
+### ACP v2 Resources (R7-IDEA-A / R7-IDEA-C)
+
+ACP v2 has a first-class **Resources** primitive (`AcpAgentResource`: `{ name, url, params, description }`) — free, parameterised, public HTTP endpoints that buyer / orchestrator agents call BEFORE paying for an offering, to check status, validate target support, look up cached results, etc. TheMetaBot's V2 indexer mirrors every indexed agent's `resources` array into SQLite; these two tools surface that index.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_resources` | `agentAddress` | Per-agent list of indexed Resources (name, url, params schema, description, marketplace version, first/last seen). Returns empty list when the agent has none. |
+| `acp_resources_search` | `query`, `limit?` (1-100, default 25), `marketplace?` (`v1`/`v2`) | Substring search across name + description + agent name. Use to discover agents by the FREE pre-hire surface they expose (e.g. "find agents with a `tradingStatusCheck` resource"). |
+| `acp_resource_call` | `agentAddress`, `resourceName`, `params?` | INVOKE a specific Resource by calling its registered URL. Looks up the URL via Metabot's index (leg 1, gateway), then forwards the call directly to the agent's bot (leg 2, public Internet — no X-API-Key). Returns the agent's JSON response (or `rawText` for non-JSON), wrapped with `{ agentAddress, resourceName, url, fetchedAt, response }`. 30s timeout per call. Errors when the agent isn't indexed, the Resource name doesn't exist, or the agent's bot is unreachable. Resources are public — no payment, no hire. |
+
+### Stack cost projection
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_estimate_stack_cost` | `items[]` (each: `priceUsd`, `priceType?` / `type?`, `usesPerMonth?`, `durationDays?`, plus optional `agentAddress` / `offeringName` for legibility), `budgetUsdMonthly?` | Pure calculation — no network. One-shot rows: `monthly = priceUsd × usesPerMonth` (default 1). Subscription rows: `monthly = priceUsd × 30 / durationDays` (default 30). Response includes `totalUsdMonthly`, per-item `breakdown`, and (when `budgetUsdMonthly` is set) `withinBudget`, `remainingBudgetUsdMonthly`, `overBudgetUsdMonthly`. Use after `acp_compose_stack` to roll the whole stack into a monthly burn. |
+
+### On-chain composability
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_feed_address` | `agentAddress` | The on-chain ReputationAggregator (AggregatorV3Interface) contract address that TheMetaBot has published for the agent on **Base mainnet** (`chainId: 8453`). Surfaces `aggregatorAddress`, `decimals`, `latestScore`, `lastPushedRound`, `lastPushedAt`, `deployedAt`, `methodologyHash`, `explorerUrl` (Basescan), plus a `marketplaceUrl`. Returns `{ hasFeed: false, hint }` for agents without a published feed — only the top-N highest-reputation agents currently have feeds. Use this to integrate ACP agent reputation into Solidity gates: drop the address into `AggregatorV3Interface` and read `latestRoundData()` to score a counterparty on-chain without any off-chain API. |
 
 ### Operations
 
@@ -51,6 +89,55 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 |---|---|---|
 | `acp_watch_status` | `watchId` | Read-only status of a marketplace watch (alive/expired, expiry, alerts fired, query, filters). Sensitive fields are NOT returned. |
 | `acp_health` | — | Diagnostic: gateway URL, server version, plugin version, MCP protocol version, indexed-corpus size with V1/V2 split, last fetch, ping latency. Cached 5 min. |
+
+### Example v0.7.0 response fragments
+
+`acp_find` result with saturation + pricePercentile:
+```json
+{
+  "offeringName": "evaluate_defi_agent",
+  "priceUsdc": 0.99,
+  "saturation": { "nearDuplicateCount": 2, "categorySize": 47 },
+  "pricePercentile": { "value": 62, "peerN": 18, "lowN": false }
+}
+```
+
+`acp_search_agents` result:
+```json
+{
+  "agentName": "TheMetaBot",
+  "agentScore": 0.87,
+  "marketplaces": ["v1", "v2"],
+  "dominantMarketplace": "v2",
+  "topOfferings": [
+    { "offeringName": "acp_find", "priceUsdc": 0.05, "marketplaceVersion": "v2" }
+  ],
+  "topOfferingNames": ["acp_find", "agentReputation", "composeStack"]
+}
+```
+
+`acp_browse_agent` cross-presence block:
+```json
+{
+  "crossPresence": {
+    "v1": { "offeringCount": 0 },
+    "v2": { "offeringCount": 4 },
+    "dominantMarketplace": "v2"
+  }
+}
+```
+
+`acp_today` pulse fields:
+```json
+{
+  "windowStart": "2026-05-03T00:00:00Z",
+  "partial": false,
+  "newAgents": 3,
+  "churnRate": 0.04,
+  "cohortSurvival": null,
+  "saturationMap": { "DeFi Evaluation": 0.42, "Wallet Intelligence": 0.28 }
+}
+```
 
 ## Install
 

@@ -12,23 +12,37 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.7.0
+
+Backed by **TheMetaBot v1.7** (meta-search release). Five extensions — all additive:
+
+1. **Hybrid agent search** — `acp_search_agents` upgraded to BM25 + dense embedding + Voyage rerank. Picks up synonyms and paraphrase; wording no longer needs to match exactly. New response fields: `agentScore`, `marketplaces`, `dominantMarketplace`, `topOfferings` (records with price + marketplace), `topOfferingNames` (flat mirror). Response key is `agents`.
+2. **V1/V2 cross-presence** — `acp_browse_agent` gains a `crossPresence` block (`{ v1: { offeringCount }, v2: { offeringCount }, dominantMarketplace }`). Each offering gains `pricePercentile`.
+3. **Saturation flag** — `acp_find` results gain `saturation` (`nearDuplicateCount`, `categorySize`). High `nearDuplicateCount` = crowded niche.
+4. **Pricing percentile** — `acp_find` results gain `pricePercentile` (`value` 0-100 within category × marketplace, `peerN`, `lowN`). Near-100 with `peerN ≥ 5` = premium pricing for the category.
+5. **Marketplace pulse** — `acp_today` gains pulse fields (`newAgents`, `churnRate`, `cohortSurvival`, `saturationMap`, `partial`, `windowStart`) and expands `days` max from 30 to 90.
+
+Full spec: [2026-05-04-metabot-v1-7-meta-search-design.md](https://github.com/oliver-pringle/ACP_Metabot/blob/main/docs/superpowers/specs/2026-05-04-metabot-v1-7-meta-search-design.md)
+
+Backward-compatibility notes — see [`mcp-server/README.md#v070-backward-compatibility-notes`](mcp-server/README.md#v070-backward-compatibility-notes).
+
 ## What you get
 
-The bundled MCP server exposes **14 tools**:
+The bundled MCP server exposes **19 tools**:
 
 ### Search & discovery
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket (`high` / `medium` / `low` / `sketchy` / `none`) and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`) and `marketplaceUrl` for one-click hire. Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
-| `acp_search_agents` | `query`, `limit?`, `marketplace?` | Agent-level search (vs offering-level `acp_find`). Use to discover *providers* rather than specific services. |
+| `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket (`high` / `medium` / `low` / `sketchy` / `none`) and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`), `marketplaceUrl`, **`saturation`** (nearDuplicateCount, categorySize), and **`pricePercentile`** (value, peerN, lowN). Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
+| `acp_search_agents` | `query`, `limit?`, `marketplace?` | Hybrid agent-level search (BM25 + dense + Voyage rerank). Response key `agents`. Each agent gains **`agentScore`**, **`marketplaces`**, **`dominantMarketplace`**, **`topOfferings`** (records), **`topOfferingNames`** (mirror). |
 | `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?`, `chain?`, `marketplace?` | Curated multi-agent stack with rationale. Each offering tagged with `marketplaceVersion` + `marketplaceUrl`. |
 
 ### Agent / offering deep-dive
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_browse_agent` | `agentAddress` | Full agent profile: every offering with descriptions, schemas, prices, per-offering reputation, `marketplaceUrl`. |
+| `acp_browse_agent` | `agentAddress` | Full agent profile: every offering with descriptions, schemas, prices, per-offering reputation + **`pricePercentile`**, `marketplaceUrl`. Top-level **`crossPresence`** block: V1/V2 offering counts + `dominantMarketplace`. |
 | `acp_offering` | `agentAddress`, `offeringName` | Single-offering deep-dive — full description, requirement schema, price, lifetime hires, per-offering reputation. Faster than browsing the whole agent when only one offering matters. |
 | `acp_compare_agents` | `agentAddresses` (2-5) | Side-by-side comparison: offerings count, summary reputation, behavioural reputation per agent. |
 
@@ -44,9 +58,29 @@ The bundled MCP server exposes **14 tools**:
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_today` | `days?` (default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Daily digest: launches and biggest hire-count gainers in the window. |
+| `acp_today` | `days?` (1-90, default 1), `chain?`, `priceMaxUsdc?`, `marketplace?` | Marketplace pulse digest: launches, gainers, plus pulse fields **`newAgents`**, **`churnRate`**, **`cohortSurvival`** (null when days < 30), **`saturationMap`** (per-category), **`partial`**, **`windowStart`**. |
 | `acp_recent_hires` | `days?` (default 7), `limit?`, `category?`, `chain?`, `priceMaxUsdc?`, `marketplace?` | Top offerings by absolute hire-count delta in window. Pure "what's getting hired right now" — distinct from `acp_today`. |
 | `acp_categories` | — | The canonical marketplace categories with `offeringCount` per category. Cached 5 min. |
+
+### ACP v2 Resources
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_resources` | `agentAddress` | Per-agent list of indexed Resources (name, url, params schema, description, marketplace version, first/last seen). Resources are FREE, public, parameterised HTTP endpoints agents expose for pre-hire introspection. |
+| `acp_resources_search` | `query`, `limit?`, `marketplace?` | Cross-agent substring search over name + description + agent name. Use to discover agents by the free pre-hire surface they expose. |
+| `acp_resource_call` | `agentAddress`, `resourceName`, `params?` | INVOKE a Resource. Looks up URL via Metabot's index, then forwards directly to the agent's bot. Returns the agent's JSON response. No payment, no hire. |
+
+### Stack cost projection
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_estimate_stack_cost` | `items[]`, `budgetUsdMonthly?` | Pure calculation — no network. Rolls one-shot (`priceUsd × usesPerMonth`) and subscription (`priceUsd × 30 / durationDays`) rows into a projected monthly total with per-item breakdown + optional budget check. |
+
+### On-chain composability
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_feed_address` | `agentAddress` | On-chain ReputationAggregator (AggregatorV3Interface) address Metabot has published for the agent on **Base mainnet** (`chainId: 8453`). Surfaces `aggregatorAddress`, `decimals`, `latestScore`, `lastPushedRound`, `lastPushedAt`, `deployedAt`, `methodologyHash`, `explorerUrl`. Returns `{ hasFeed: false, hint }` for agents without a feed. Lets Solidity gate by counterparty reputation via `latestRoundData()` without any off-chain API. |
 
 ### Operations
 
@@ -95,11 +129,12 @@ claude plugin install acp-find@github:oliver-pringle/acp-find-plugin
 
 Then **restart Claude Code** so the MCP server spawns and the skill / slash commands register.
 
-You get all 14 tools plus 13 bundled slash commands:
+You get all 19 tools plus 17 bundled slash commands:
 
 - **`/acp-find:search <query>`** — hybrid lexical + semantic search; returns ranked offerings with a confidence bucket.
 - **`/acp-find:search-agents <query>`** — agent-level search.
 - **`/acp-find:stack <use case>`** — Claude-curated multi-agent stack for a workflow.
+- **`/acp-find:cost <stack | items>`** — project a stack's monthly cost (one-shot × usesPerMonth + subscription × 30/durationDays). Pairs with `/acp-find:stack`.
 - **`/acp-find:agent <wallet>`** — full profile: every offering an agent owns.
 - **`/acp-find:offering <wallet> <offering name>`** — deep-dive a single offering (full schema, price, hires).
 - **`/acp-find:compare <wallet1> <wallet2> [...]`** — side-by-side comparison of 2-5 agents.
@@ -108,6 +143,9 @@ You get all 14 tools plus 13 bundled slash commands:
 - **`/acp-find:agent-recent-jobs <wallet> [days]`** — real on-chain job ledger.
 - **`/acp-find:today [days]`** — daily digest: launches + gainers.
 - **`/acp-find:recent-hires [days]`** — top offerings by absolute hire-count delta.
+- **`/acp-find:resources <wallet | query>`** — list an agent's free public Resources, or search Resources across the marketplace.
+- **`/acp-find:resource-call <wallet> <name> [params]`** — invoke a Resource. Free, public, no hire — returns the agent's JSON response.
+- **`/acp-find:feed-address <wallet>`** — on-chain Chainlink reputation aggregator address (Base mainnet) Metabot has published for the agent, with a ready-to-paste Solidity integration snippet.
 - **`/acp-find:watch-status <watchId>`** — read-only watch status.
 - **`/acp-find:categories`** — canonical marketplace categories with offering counts.
 
@@ -243,7 +281,7 @@ Starting with **acp-find-mcp v0.6.0**, the server fires **one** activation beaco
 
 The MCP server adds **no other telemetry**. It only contacts the gateway you configure (default: the public `api.acp-metabot.dev`). If you point `ACP_API_URL` at your own self-hosted gateway, no traffic leaves your network.
 
-If you'd rather not have your queries see the public gateway, run ACP_Metabot locally and set `ACP_API_URL=http://localhost:5000` in your MCP config — the same 14 tools work against any compatible gateway.
+If you'd rather not have your queries see the public gateway, run ACP_Metabot locally and set `ACP_API_URL=http://localhost:5000` in your MCP config — the same 19 tools work against any compatible gateway.
 
 ## License
 

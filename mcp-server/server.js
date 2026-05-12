@@ -201,7 +201,7 @@ const TOOLS = [
   {
     name: "acp_find",
     description:
-      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, a `marketplaceVersion` (`v1` | `v2`), a `marketplaceUrl` for one-click hire, and a reputation block. Searches V1 + V2 marketplaces in one call by default. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Returns a `confidence` bucket (high|medium|low|sketchy|none) derived from the top score. Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category, marketplace, offset (pagination). Use for 'is there an agent that can do X' questions.",
+      "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, a `marketplaceVersion` (`v1` | `v2`), a `marketplaceUrl` for one-click hire, and a reputation block. Searches V1 + V2 marketplaces in one call by default. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Returns a `confidence` bucket (high|medium|low|sketchy|none) derived from the top score. Each result now includes `saturation` (nearDuplicateCount + categorySize — how crowded the niche is) and `pricePercentile` (value 0-100 within category × marketplace, peerN, lowN flag). Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category, marketplace, offset (pagination). Use for 'is there an agent that can do X' questions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -334,15 +334,15 @@ const TOOLS = [
   {
     name: "acp_today",
     description:
-      "Daily digest of the ACP marketplace. Returns offerings launched in the last N days plus the biggest hire-count gainers (when comparison data is available). Each result is tagged with `marketplaceVersion` and `marketplaceUrl`. Spans both marketplaces by default. Optional filters: chain, priceMaxUsdc, marketplace. Use for 'what's new on ACP', 'show me what just launched', 'what's trending'.",
+      "Marketplace pulse digest. Returns offerings launched in the last N days plus the biggest hire-count gainers. Window: 1–90 days (default 1). Each result is tagged with `marketplaceVersion` and `marketplaceUrl`. Spans both marketplaces by default. Response includes pulse fields: `newAgents` (agent inflow in window), `churnRate` (fraction gone inactive), `cohortSurvival` (null when days < 30), `saturationMap` (per-category near-duplicate density), `partial` (true when window crosses a data gap). Optional filters: chain, priceMaxUsdc, marketplace. Use for 'what's new on ACP', 'show me what just launched', 'what's trending', or 'show me marketplace health stats'.",
     inputSchema: {
       type: "object",
       properties: {
         days: {
           type: "number",
-          description: "Lookback window in days (1-30). Default 1 (last 24h).",
+          description: "Lookback window in days (1-90). Default 1 (last 24h).",
           minimum: 1,
-          maximum: 30
+          maximum: 90
         },
         priceMaxUsdc: {
           type: "number",
@@ -364,7 +364,7 @@ const TOOLS = [
   {
     name: "acp_browse_agent",
     description:
-      "Full profile for an ACP agent by wallet address. Returns the agent's reputation summary plus every offering they own with full descriptions, requirement schemas, prices, per-offering reputation, and a `marketplaceUrl`. Use when the user pastes a wallet address and asks 'what does this agent do', or after acp_find when the user wants the full picture of a specific agent.",
+      "Full profile for an ACP agent by wallet address. Returns the agent's reputation summary plus every offering they own with full descriptions, requirement schemas, prices, per-offering reputation, and a `marketplaceUrl`. In v1.7 the response also includes a top-level `crossPresence` block summarising the agent's V1/V2 footprint (offeringCount per marketplace, dominantMarketplace: 'v1'|'v2'|'tied'|'none') and per-offering `pricePercentile` (value 0-100, peerN, lowN). Use when the user pastes a wallet address and asks 'what does this agent do', or after acp_find when the user wants the full picture of a specific agent.",
     inputSchema: {
       type: "object",
       properties: {
@@ -498,7 +498,7 @@ const TOOLS = [
   {
     name: "acp_search_agents",
     description:
-      "Search for AGENTS (not offerings) by query against agent name + bio + total offerings. Distinct from acp_find which searches the offering corpus. Use when the user wants to discover providers by what THEY do across all their offerings, rather than picking one specific service.",
+      "Hybrid (BM25 + dense + Voyage rerank) agent search. Searches AGENTS (not offerings) by query against agent name + bio + aggregated offering descriptions. Distinct from acp_find which searches the offering corpus. Returns ranked agents with `marketplaces` (array of 'v1'|'v2' where the agent has offerings), `dominantMarketplace` ('v1'|'v2'|'tied'|'none'), `agentScore` (post-rerank cosine, higher = more relevant — treat as opaque rank signal), `topOfferings` (records with offeringName, priceUsdc, marketplaceVersion), and `topOfferingNames` (mirror of names-only for quick display). Response key is `agents`. Use when the user wants to discover providers by what THEY do across all their offerings.",
     inputSchema: {
       type: "object",
       properties: {
@@ -532,6 +532,115 @@ const TOOLS = [
     description:
       "Diagnostic check on the public ACP_Metabot gateway. Returns gateway URL, server version, plugin version, MCP protocol version, indexed-corpus size (with V1 vs V2 split), last indexer fetch time, category-classifier readiness, and round-trip ping in ms. Use when search/stack tools return errors, when the user asks 'is acp-find working?', or to confirm the gateway is reachable before a long session.",
     inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "acp_agent_resources",
+    description:
+      "Lists the ACP v2 Resources registered by a specific agent. Resources are free, parameterised, public HTTP endpoints (AcpAgentResource: name + url + params + description) that buyer / orchestrator agents call BEFORE paying for an offering — to check status, validate the target is supported, look up cached results, etc. Use when the user has identified an agent (via acp_find or acp_browse_agent) and wants to know what FREE introspection it exposes before hiring. Returns an empty list when the agent has no Resources indexed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        }
+      },
+      required: ["agentAddress"]
+    }
+  },
+  {
+    name: "acp_resources_search",
+    description:
+      "Search across every indexed agent's ACP v2 Resources by free-text query. Matches name + description + agent name. Use when the user wants to discover agents by the FREE pre-hire surface they expose (e.g. 'find an agent with a tradingStatusCheck resource', 'which agents expose a feedCatalogue resource'). Returns up to 100 results ordered by recency. Distinct from acp_find (which searches priced offerings); use this for the meta-question of WHICH agents publish Resources at all.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Natural-language or keyword query. Matches substring on Resource name / description / agent name. Max 200 chars."
+        },
+        limit: {
+          type: "number",
+          description: "Max results to return (1-100). Defaults to 25."
+        },
+        marketplace: {
+          type: "string",
+          enum: ["v1", "v2"],
+          description: "Optional. Restrict to one ACP marketplace. Resources are V2-only in practice — v1 marketplace agents don't register them."
+        }
+      },
+      required: ["query"]
+    }
+  },
+  {
+    name: "acp_resource_call",
+    description:
+      "Invoke a specific Resource on an agent by calling its registered URL. Resources are free, public HTTP endpoints — this tool first looks up the URL via Metabot's index (the same data acp_agent_resources / acp_resources_search return), then forwards the call directly to the agent's bot. Use AFTER acp_agent_resources or acp_resources_search has identified the Resource you want. Returns the agent's JSON response (or rawText for non-JSON). Resources are public — no API key, no payment. 30s timeout per call. Errors if the agent isn't indexed by Metabot, has no Resource by that name, or the agent's bot is unreachable.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        },
+        resourceName: {
+          type: "string",
+          description: "Name of the Resource as registered on the marketplace (e.g. 'searchStatus', 'feedCatalogue', 'tradingStatusCheck'). Case-sensitive."
+        },
+        params: {
+          type: "object",
+          description: "Optional key/value pairs sent as query string. Values are stringified; objects are JSON-stringified. Resources are GET-only; if a Resource needs a POST body, this tool won't reach it (rare in v2)."
+        }
+      },
+      required: ["agentAddress", "resourceName"]
+    }
+  },
+  {
+    name: "acp_estimate_stack_cost",
+    description:
+      "Roll up the projected monthly cost of a stack of ACP offerings. Use after acp_compose_stack or when the user has hand-picked a set of offerings and asks 'what does this cost me per month?'. One-shot offerings: monthlyUsd = priceUsd × usesPerMonth (defaults to 1 if not specified). Subscription offerings: monthlyUsd = priceUsd × 30 / durationDays (defaults to 30-day tier). Includes a budget check when budgetUsdMonthly is supplied. Pure calculation — no network calls, no fetch from the marketplace; caller passes the price data inline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description: "Stack items to project. Each item carries the priceUsd + priceType from whichever discovery tool surfaced it (acp_compose_stack, acp_offering, acp_find).",
+          items: {
+            type: "object",
+            properties: {
+              agentAddress: { type: "string", description: "Optional. Surfaced in the breakdown for legibility." },
+              offeringName: { type: "string", description: "Optional. Surfaced in the breakdown for legibility." },
+              priceUsd:    { type: "number", description: "Price per call (one-shot) or per tier period (subscription). REQUIRED." },
+              priceType:   { type: "string", enum: ["one_shot", "subscription"], description: "Costing model. Subscription rows must also set durationDays." },
+              type:        { type: "string", enum: ["one_shot", "subscription"], description: "Alias for priceType. Use whichever the discovery tool provided." },
+              usesPerMonth:  { type: "number", description: "One-shot only. Expected calls per month. Defaults to 1." },
+              durationDays:  { type: "number", description: "Subscription only. Days the priceUsd covers. Defaults to 30." }
+            },
+            required: ["priceUsd"]
+          }
+        },
+        budgetUsdMonthly: {
+          type: "number",
+          description: "Optional. If set, response includes withinBudget + remainingBudgetUsdMonthly so the LLM can recommend adjustments."
+        }
+      },
+      required: ["items"]
+    }
+  },
+  {
+    name: "acp_agent_feed_address",
+    description:
+      "Look up the on-chain Chainlink reputation aggregator (AggregatorV3Interface) address that TheMetaBot has published for an agent. Returned address is a per-agent ReputationAggregator contract on Base mainnet (chainId 8453) that exposes the agent's behavioural-reputation score as a standard `latestRoundData()` feed — letting Solidity code gate by counterparty reputation without going through any off-chain API. Use when the user wants to (a) verify-onchain integrate an agent's reputation into a smart contract, (b) check whether Metabot has published a feed for a given agent yet, or (c) get the explorer URL of the aggregator. Returns 404 with a 'not yet published' hint when no feed has been deployed for the agent (only the top-N highest-reputation agents currently have feeds).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        }
+      },
+      required: ["agentAddress"]
+    }
   }
 ];
 
@@ -801,7 +910,234 @@ const HANDLERS = {
     };
     cachePut("health", decorated);
     return decorated;
-  }
+  },
+
+  acp_agent_resources: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const result = await callGateway(
+      `/v1/agent/${encodeURIComponent(addr)}/resources`,
+      undefined,
+      "GET"
+    );
+    if (result && typeof result === "object") {
+      result.marketplaceUrl = agentUrl(addr);
+    }
+    return result;
+  },
+
+  acp_resources_search: async (args) => {
+    if (!args?.query) throw new Error("query is required");
+    const params = new URLSearchParams();
+    params.set("query", String(args.query));
+    if (typeof args.limit === "number") params.set("limit", String(args.limit));
+    const mv = normalizeMarketplace(args.marketplace);
+    if (mv) params.set("marketplace", mv);
+    const result = await callGateway(
+      `/v1/marketplace/resources/search?${params.toString()}`,
+      undefined,
+      "GET"
+    );
+    decorateMarketplaceUrls(result);
+    return result;
+  },
+
+  // Invokes a specific Resource on an agent. Two network legs:
+  //   1. Look up the registered URL via Metabot's /v1/agent/<addr>/resources
+  //   2. GET that URL with caller params as query string
+  // The second leg goes DIRECTLY to the agent's bot, not through Metabot —
+  // Resources are public so we don't need to round-trip through our gateway.
+  // No X-API-Key is sent on leg 2 (third-party bots wouldn't recognise ours).
+  acp_resource_call: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    if (!args?.resourceName) throw new Error("resourceName is required");
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const name = String(args.resourceName).trim();
+    const params = args.params && typeof args.params === "object" ? args.params : {};
+
+    // Leg 1 — look up the URL via Metabot's index.
+    const indexResp = await callGateway(
+      `/v1/agent/${encodeURIComponent(addr)}/resources`,
+      undefined,
+      "GET"
+    );
+    const list = indexResp?.resources ?? [];
+    const resource = list.find((r) => r?.name === name);
+    if (!resource) {
+      const available = list.map((r) => r?.name).filter(Boolean).join(", ") || "(none indexed)";
+      throw new Error(
+        `Agent ${addr} has no resource named "${name}". Available: ${available}. ` +
+          "Try acp_agent_resources or acp_resources_search to discover available resources."
+      );
+    }
+    if (!resource.url) {
+      throw new Error(`Resource "${name}" has no registered URL.`);
+    }
+
+    let callUrl;
+    try {
+      callUrl = new URL(resource.url);
+    } catch {
+      throw new Error(`Resource "${name}" has an invalid URL: ${resource.url}`);
+    }
+    for (const [k, v] of Object.entries(params)) {
+      if (v == null) continue;
+      callUrl.searchParams.set(
+        k,
+        typeof v === "object" ? JSON.stringify(v) : String(v)
+      );
+    }
+
+    // Leg 2 — direct call. Reuse the same timeout the gateway uses.
+    logVerbose(`→ resource call ${name} on ${addr}: ${callUrl.toString()}`);
+    let resp;
+    try {
+      resp = await fetch(callUrl.toString(), {
+        method: "GET",
+        headers: { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      throw new Error(
+        `Resource call to ${callUrl.toString()} failed: ${err.message}`
+      );
+    }
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      throw new Error(
+        `Resource "${name}" returned ${resp.status} ${resp.statusText}: ${body.slice(0, 500)}`
+      );
+    }
+
+    const ctype = (resp.headers.get("content-type") || "").toLowerCase();
+    const response = ctype.includes("application/json")
+      ? await resp.json()
+      : { rawText: await resp.text() };
+
+    return {
+      agentAddress: addr,
+      resourceName: name,
+      url: callUrl.toString(),
+      fetchedAt: new Date().toISOString(),
+      response,
+    };
+  },
+
+  acp_agent_feed_address: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    if (!isHexAddress(args.agentAddress)) {
+      throw new Error("agentAddress must be 0x followed by 40 hex chars");
+    }
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const url = `${API_URL}/v1/agent/${encodeURIComponent(addr)}/feed-address`;
+    const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    const startedAt = Date.now();
+    logVerbose(`→ GET /v1/agent/${addr}/feed-address`);
+    const res = await fetchWithRetry(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    logVerbose(`← GET /v1/agent/${addr}/feed-address ${res.status} (${Date.now() - startedAt}ms)`);
+    if (res.status === 404) {
+      const body = await res.json().catch(() => ({}));
+      return {
+        agentAddress: addr,
+        hasFeed: false,
+        hint:
+          body.hint ??
+          "No Chainlink reputation feed has been published for this agent yet. " +
+            "TheMetaBot only publishes feeds for the top-N highest-reputation agents.",
+        marketplaceUrl: agentUrl(addr),
+      };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `/v1/agent/${addr}/feed-address returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`
+      );
+    }
+    const json = await res.json();
+    json.hasFeed = true;
+    json.marketplaceUrl = agentUrl(addr);
+    return json;
+  },
+
+  // Pure calculation — rolls a list of priced offerings into a monthly cost.
+  // No network. Caller passes prices inline (typically copied from
+  // acp_compose_stack output). One-shot rows multiply price × usesPerMonth;
+  // subscription rows scale priceUsd by 30/durationDays so a $5 / 7d tier
+  // shows up as $21.43/mo. Budget check is opt-in via budgetUsdMonthly.
+  acp_estimate_stack_cost: async (args) => {
+    if (!Array.isArray(args?.items)) throw new Error("items[] is required");
+    const budget =
+      typeof args.budgetUsdMonthly === "number" && Number.isFinite(args.budgetUsdMonthly)
+        ? args.budgetUsdMonthly
+        : null;
+
+    let total = 0;
+    const breakdown = args.items.map((item, idx) => {
+      const priceUsd =
+        typeof item?.priceUsd === "number"
+          ? item.priceUsd
+          : parseFloat(item?.priceUsd);
+      if (!Number.isFinite(priceUsd) || priceUsd < 0) {
+        throw new Error(
+          `items[${idx}].priceUsd must be a non-negative number; got ${item?.priceUsd}`
+        );
+      }
+      const priceType = item?.priceType ?? item?.type ?? "one_shot";
+      const isSubscription = priceType === "subscription";
+
+      let monthlyUsd;
+      let costModel;
+      if (isSubscription) {
+        const days =
+          typeof item?.durationDays === "number" && item.durationDays > 0
+            ? item.durationDays
+            : 30;
+        monthlyUsd = priceUsd * (30 / days);
+        costModel = `$${priceUsd}/${days}d → $${monthlyUsd.toFixed(4)}/mo`;
+      } else {
+        const uses =
+          typeof item?.usesPerMonth === "number" && item.usesPerMonth >= 0
+            ? item.usesPerMonth
+            : 1;
+        monthlyUsd = priceUsd * uses;
+        costModel = `$${priceUsd}/call × ${uses} uses/mo → $${monthlyUsd.toFixed(4)}/mo`;
+      }
+      total += monthlyUsd;
+
+      return {
+        agentAddress: item?.agentAddress ?? null,
+        offeringName: item?.offeringName ?? null,
+        priceUsd,
+        priceType: isSubscription ? "subscription" : "one_shot",
+        usesPerMonth: isSubscription ? null : (item?.usesPerMonth ?? 1),
+        durationDays: isSubscription ? (item?.durationDays ?? 30) : null,
+        monthlyUsd: Number(monthlyUsd.toFixed(6)),
+        costModel,
+      };
+    });
+
+    const totalRounded = Number(total.toFixed(2));
+    return {
+      totalUsdMonthly: totalRounded,
+      breakdown,
+      budgetUsdMonthly: budget,
+      withinBudget: budget == null ? null : totalRounded <= budget,
+      remainingBudgetUsdMonthly:
+        budget == null ? null : Number((budget - totalRounded).toFixed(2)),
+      overBudgetUsdMonthly:
+        budget == null ? null : Math.max(0, Number((totalRounded - budget).toFixed(2))),
+      notes: [
+        "One-shot: monthly = priceUsd × usesPerMonth (default 1).",
+        "Subscription: monthly = priceUsd × 30 / durationDays (default 30).",
+        "Set usesPerMonth per one-shot item for accurate projections.",
+      ],
+    };
+  },
 };
 
 async function dispatchTool(name, args) {

@@ -2,6 +2,44 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## 0.8.0 — drafted 2026-05-11, gateway deployed 2026-05-12, npm publish pending — R7-IDEA-C + Resources end-to-end + cost projection + on-chain feed address
+
+Closes the ACP v2 Resources loop end-to-end (discover → invoke), adds a calculation-only stack cost projector, and surfaces the on-chain Chainlink reputation aggregator address for Solidity integration.
+
+**Deploy status:** TheMetaBot v1.6 (gateway support for all four backend-dependent tools) is live on `api.acp-metabot.dev` as of 2026-05-12 — verified with corpus rebuilt to 34,875 offerings and `GET /v1/agent/{addr}/feed-address` returning the expected 404+hint shape for unpublished agents. The acp-find-mcp npm package republish is pending the next manual `npm publish` (WebAuthn-gated); until then clients running v0.7.x against the public gateway can still call the new tools by exact name if they manually add them, but tool discovery requires the v0.8.0 npm bundle.
+
+### Added
+
+- **5 new MCP tools** (14 → 19):
+  - `acp_agent_resources` — list one agent's indexed Resources by wallet address (R7-IDEA-C).
+  - `acp_resources_search` — cross-agent search across name + description + agent name. Use to discover agents by the FREE pre-hire introspection surface they expose (R7-IDEA-C).
+  - `acp_resource_call` — INVOKE a Resource. Looks up the registered URL via Metabot's index, then calls it directly. Returns the agent's JSON response (or rawText). Closes the loop: discovery → invocation, no payment, no hire.
+  - `acp_estimate_stack_cost` — pure calculation, no network. Rolls a list of priced offerings into a projected monthly cost. One-shot: `priceUsd × usesPerMonth`. Subscription: `priceUsd × 30 / durationDays`. Optional `budgetUsdMonthly` check.
+  - `acp_agent_feed_address` — on-chain composability. Returns the Base-mainnet ReputationAggregator (AggregatorV3Interface) contract address Metabot has published for the agent. Lets Solidity gate by ACP counterparty reputation via `latestRoundData()` without any off-chain API. Returns `{ hasFeed: false, hint }` for agents without a feed (only top-N highest-reputation agents currently have feeds).
+- **4 new slash commands:**
+  - `/acp-find:resources <addr | query>` — auto-routes to `acp_agent_resources` (for addresses) or `acp_resources_search` (for free-text).
+  - `/acp-find:resource-call <agent> <resource> [params]` — wraps `acp_resource_call`, accepts JSON / `k=v` / `addr/name` shorthands.
+  - `/acp-find:cost` — wraps `acp_estimate_stack_cost`, pairs naturally with `/acp-find:stack`.
+  - `/acp-find:feed-address <addr>` — wraps `acp_agent_feed_address`. Renders the on-chain aggregator address with a ready-to-paste Solidity integration snippet.
+
+### Backend (TheMetaBot)
+
+- New `agent_resources` SQLite table mirroring `AcpAgentResource` (name + url + params + description) per indexed V2 agent.
+- `AcpV2MarketplaceSource` writes resources as a side-effect of its per-wallet fetch — no change to the `IMarketplaceSource` contract.
+- Three new HTTP endpoints on the public gateway:
+  - `GET /v1/agent/{address}/resources` — per-agent list (sits alongside the existing `/v1/agent/{address}` browse endpoint). Used by both `acp_agent_resources` AND `acp_resource_call` (the latter pulls the URL from here before forwarding to the agent's bot).
+  - `GET /v1/marketplace/resources/search?query=...&limit=...&marketplace=...` — cross-agent substring search.
+  - `GET /v1/agent/{address}/feed-address` — per-agent reputation aggregator lookup. Reads from `reputation_feeds` (populated by the v0.1–v0.4 ReputationFeedPublisher + ReputationFeedSyncWorker pipeline). 404 with `hint` when no feed has been deployed.
+- All three endpoints rate-limited at 120/IP/hr via the `public-marketplace-resources` policy.
+
+### Plugin transport
+
+- `acp_resource_call` does a two-leg fetch: leg 1 (the URL lookup) goes through Metabot's gateway with X-API-Key; leg 2 (the actual Resource call) goes DIRECT to the agent's bot with no API key (third-party bots wouldn't recognise ours). Both legs use `REQUEST_TIMEOUT_MS` (30s).
+
+### Backward compatibility
+
+- All changes are **additive** — no existing tools, fields, or routes were modified or removed.
+
 ## 0.5.0 — 2026-05-03
 
 Largest release since v0.4.0 introduced V1+V2 cross-version search.
