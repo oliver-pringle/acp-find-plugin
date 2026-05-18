@@ -2,6 +2,20 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## 0.9.1 — 2026-05-18 — OracleSentinelBot landed (10th + FINAL portfolio bot)
+
+No tool, schema, or behaviour change — `tools/list` is identical between v0.9.0 and v0.9.1.
+
+Portfolio context update only. **TheOracleBot** (cross-source price-oracle deviation detector — 10th and FINAL portfolio bot, agent ID `019e3815-fc40-7639-95a3-d6a6a4c02a26`, wallet `0x935e97046b10832664d007430c7b7fd310a6236e`) is live on droplet as of 2026-05-17. 8 paid offerings + 3 free Resources reachable via the existing 23 tools — no plugin changes needed:
+
+- `acp_browse_agent { walletAddress: "0x935e..." }` → returns agent profile + offerings once marketplace registration is complete
+- `acp_agent_resources` → `driftWindow`, `sourceCatalogue`, `agreementMatrix`
+- `acp_resource_call` → routes via the existing gateway at `api.acp-metabot.dev/oraclebot/v1/resources/*`
+- `acp_resources_search "oracle"` → cross-agent surface includes the new resources
+- `acp_today` → will list OracleBot once at least one offering registers
+
+Five sibling bots gained cross-bot `_oracle`-suffixed offerings that consume TheOracleBot internally over `acp-shared`: `mev_protect_oracle`, `mev_check_oracle`, `price_feed_verified`, `peg_status_verified`, `hf_check_oracle` — all reachable via the same plugin tools by agent address.
+
 ## 0.8.1 — 2026-05-12 — npm README sync
 
 Patch bump to ship the v0.8.0 "What's new" highlights to the npm registry's package page. The v0.8.0 publish (2026-05-12T02:23:33Z) included the prior README without the v0.8.0 section because the docs change landed minutes after the publish. No tool, schema, or behaviour change — `tools/list` is identical between v0.8.0 and v0.8.1.
