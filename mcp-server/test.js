@@ -81,8 +81,13 @@ const EXPECTED_TOOLS = [
   "acp_estimate_stack_cost",
   "acp_find",
   "acp_health",
+  "acp_hire_decision",
   "acp_marketplace_gap",
   "acp_offering",
+  "acp_oracle_capabilities",
+  "acp_oracle_drift",
+  "acp_oracle_sources",
+  "acp_portfolio_status",
   "acp_recent_hires",
   "acp_resource_call",
   "acp_resources_search",
@@ -92,6 +97,7 @@ const EXPECTED_TOOLS = [
   "acp_risk_rubric",
   "acp_risk_snapshot",
   "acp_risk_sources",
+  "acp_safe_quote",
   "acp_search_agents",
   "acp_today",
   "acp_watch_status"
@@ -120,7 +126,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 31 tools with required schemas", async () => {
+test("tools/list returns all 37 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -450,6 +456,165 @@ test("acp_risk_attestation validates address shape", async () => {
     });
     assert.equal(r.result.isError, true);
     assert.match(r.result.content[0].text, /0x followed by 40 hex chars/);
+  } finally {
+    conn.close();
+  }
+});
+
+// ===== v0.10.0 tests =====
+
+test("acp_oracle_sources / drift / capabilities expose proper schemas", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const sources = r.result.tools.find(t => t.name === "acp_oracle_sources");
+    const drift   = r.result.tools.find(t => t.name === "acp_oracle_drift");
+    const caps    = r.result.tools.find(t => t.name === "acp_oracle_capabilities");
+    assert.ok(sources && sources.inputSchema.properties.chainId);
+    assert.ok(drift   && drift.inputSchema.properties.chainId);
+    assert.ok(caps    && caps.inputSchema.properties.chainId);
+    assert.equal(caps.inputSchema.properties.tokenSymbol.type, "string");
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_hire_decision requires useCase + exposes correct schema", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const noUseCase = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_hire_decision", arguments: {} }
+    });
+    assert.equal(noUseCase.result.isError, true);
+    assert.match(noUseCase.result.content[0].text, /useCase is required/);
+
+    const list = await conn.rpc({ jsonrpc: "2.0", id: 3, method: "tools/list" });
+    const tool = list.result.tools.find(t => t.name === "acp_hire_decision");
+    assert.ok(tool.inputSchema.properties.useCase);
+    assert.equal(tool.inputSchema.properties.useCase.type, "string");
+    assert.ok(tool.inputSchema.properties.budgetUsdc);
+    assert.deepEqual(tool.inputSchema.required, ["useCase"]);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_safe_quote validates required args + address shape", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const noAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_safe_quote", arguments: { offeringName: "today" } }
+    });
+    assert.equal(noAddr.result.isError, true);
+    assert.match(noAddr.result.content[0].text, /agentAddress is required/);
+
+    const noOffering = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "acp_safe_quote", arguments: { agentAddress: "0x1111111111111111111111111111111111111111" } }
+    });
+    assert.equal(noOffering.result.isError, true);
+    assert.match(noOffering.result.content[0].text, /offeringName is required/);
+
+    const badAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 4, method: "tools/call",
+      params: { name: "acp_safe_quote", arguments: { agentAddress: "0xnotahex", offeringName: "today" } }
+    });
+    assert.equal(badAddr.result.isError, true);
+    assert.match(badAddr.result.content[0].text, /0x followed by 40 hex chars/);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_portfolio_status returns 10-bot envelope even when all probes fail", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_portfolio_status", arguments: {} }
+    });
+    assert.equal(r.result.isError, undefined,
+      "portfolio_status should not surface as isError even when probes fail");
+    const parsed = JSON.parse(r.result.content[0].text);
+    assert.equal(parsed.count, 10);
+    assert.equal(parsed.bots.length, 10);
+    assert.equal(parsed.healthyCount, 0, "broken URL means no bot is reachable");
+    for (const bot of parsed.bots) {
+      assert.ok(bot.name && bot.role, "each bot must carry name + role");
+      assert.equal(bot.reachable, false);
+      assert.ok(typeof bot.latencyMs === "number" && bot.latencyMs >= 0);
+      assert.ok(bot.error, "each unreachable bot must carry an error string");
+    }
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_recent_hires schema includes offset (pagination)", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const tool = r.result.tools.find(t => t.name === "acp_recent_hires");
+    assert.ok(tool.inputSchema.properties.offset);
+    assert.equal(tool.inputSchema.properties.offset.minimum, 0);
+    assert.equal(tool.inputSchema.properties.offset.maximum, 1000);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_agent_recent_jobs schema includes offset (pagination)", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const tool = r.result.tools.find(t => t.name === "acp_agent_recent_jobs");
+    assert.ok(tool.inputSchema.properties.offset);
+    assert.equal(tool.inputSchema.properties.offset.minimum, 0);
+    assert.equal(tool.inputSchema.properties.offset.maximum, 1000);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_oracle_drift accepts chainId and produces gateway error on broken URL", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_oracle_drift", arguments: { chainId: 8453 } }
+    });
+    // Broken-URL env → handler should bubble a gateway error
+    assert.equal(r.result.isError, true);
   } finally {
     conn.close();
   }

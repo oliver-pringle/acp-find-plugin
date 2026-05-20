@@ -11,6 +11,30 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.10.0
+
+Six new tools (31 → 37), four new slash commands (24 → 28), pagination on the two recent-activity surfaces. All additive — no existing tool signatures changed. Backs **TheOracleBot** (10th and FINAL portfolio bot) + extends v0.9.1's safety primitives with **cross-portfolio composition**.
+
+1. **OracleBot Resource coverage (3 tools).** TheOracleBot ships 3 reachable free Resources via the gateway slug `api.acp-metabot.dev/oraclebot/v1/resources/*`. Typed wrappers — free pass-through to the same Resources `acp_resource_call` could already invoke, but with proper schemas, default `chainId: 8453`, and 5-min caching on the stable ones.
+   - `acp_oracle_sources` — list of active source readers (Chainlink, Pyth, RedStone, Uniswap V3 30m TWAP). Cached 5 min.
+   - `acp_oracle_drift` — 24h cross-source drift incidents (`tokensWithIncidents` + per-token rows). NOT cached — drift is current state.
+   - `acp_oracle_capabilities` — coverage matrix per `(chainId, tokenSymbol)`. Cached 5 min.
+
+2. **Cross-portfolio composition (3 tools).** Composite tools that orchestrate the v0.9.1 building blocks at scale.
+   - `acp_hire_decision` ⭐ — compose_stack + per-agent reputation + ranking + recommendation in one call. Saves N+1 round trips for "find me the best agent for X". Composite score = 0.7 × reputation + 0.3 × inverse-price.
+   - `acp_safe_quote` ⭐ — offering + agent_verify(lite) in parallel. Saves 1 round trip on the natural "show me X, is it safe" pattern. Sub-call count: 4 (1 offering + 3 verify-lite).
+   - `acp_portfolio_status` ⭐ — probes all 10 portfolio bots in parallel via a known-reachable Resource per slug; returns per-bot reachability, gateway latency, sample excerpt, and aggregate `healthyCount`.
+
+3. **Pagination on recent-activity (schema-only, no new tool).**
+   - `acp_recent_hires` and `acp_agent_recent_jobs` gain an `offset?` field (0-1000) on their input schemas, mirroring `acp_find`. Combine with `limit` to page through high-traffic windows.
+
+### v0.10.0 backward-compatibility notes
+
+- All v0.10.0 changes are **additive**. Existing 31 tools have identical signatures and response shapes.
+- MCP protocol stays at `2025-11-25`. New tools appear in `tools/list` automatically once you upgrade.
+- The risk pipeline remains `DEGRADED` in production (same as v0.9.1 — LiquidGuard / RevokeBot / MEVProtect risk lanes off; reputation lane fresh). `acp_safe_quote` runs `acp_agent_verify(depth: lite)` which excludes recentJobs but still calls risk_snapshot; partial risk surfaces in the verdict as documented in v0.9.1.
+- `PORTFOLIO_BOTS` is hardcoded in `server.js` for `acp_portfolio_status` (10 bots verified live 2026-05-20). When a new bot is ever added, the MCP needs a release.
+
 ## What's new in v0.9.1
 
 Eight new tools (23 → 31), six new slash commands (18 → 24), and the largest single batch of buyer-side intelligence since the Resources end-to-end ship in v0.8.0. All additive — no existing tool signatures or response shapes changed. Backs **TheMetaBot v1.8** (Portfolio Risk pipeline, commit `8b17e35`) and **v1.9** (Marketplace pack, commit `bc26684`).
@@ -85,7 +109,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (31)
+## Tools (37)
 
 ### Search & discovery
 
@@ -166,6 +190,26 @@ Wraps TheMetaBot v1.8 portfolio-risk pipeline + v1.9 marketplace pack. Risk endp
 | `acp_risk_sources` | — | Per-source health (`fresh`/`stale`/`unavailable`) for LiquidGuard, RevokeBot, MEVProtect, and TheMetaBot's reputation lane, plus an overall `verdict` (`FRESH` / `DEGRADED` / `UNAVAILABLE`). Cached 5 min. Free Metabot Resource. |
 | `acp_risk_rubric` | — | Methodology behind the score: weights per component, grade bands (A=85+ / B=70+ / C=55+ / D=40+ / F), bucket tables. Cached 5 min. Free Metabot Resource. |
 | `acp_agent_verify` ⭐ | `walletAddress`, `chain?`, `depth?` (`lite`/`full`, default `full`) | **Composite pre-hire safety check.** Runs reputation + arena + recentJobs + risk_snapshot in parallel and synthesises a rule-based verdict (`STRONG_BUY` / `OK` / `CAUTION` / `AVOID` / `UNKNOWN`) + headline. `depth: 'lite'` skips recentJobs (3 sub-calls instead of 4). Errors in any sub-call surface as `{ error }` inside that dimension; partial verdicts are explicitly allowed. |
+
+### OracleBot Resources (v0.10.0)
+
+Typed wrappers for TheOracleBot's 3 free Resources via gateway slug `api.acp-metabot.dev/oraclebot/v1/resources/*`. Pre-hire validation surface — paid `oracle_*` POST offerings stay on the marketplace.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_oracle_sources` | `chainId?` (default 8453) | Active source readers + descriptive note. 4 sources on Base mainnet (Chainlink, Pyth, RedStone, UniV3 30m TWAP). Cached 5 min. |
+| `acp_oracle_drift` | `chainId?` | 24h cross-source drift incidents: `tokensWithIncidents` + per-token `rows[]`. NOT cached — drift is current state. |
+| `acp_oracle_capabilities` | `chainId?`, `tokenSymbol?` | Coverage matrix per `(chainId, tokenSymbol)`. With `tokenSymbol`: `supportingSources[]` + `supported: boolean`. Without: the full matrix. Cached 5 min. |
+
+### Cross-portfolio composition (v0.10.0)
+
+Composite tools that orchestrate v0.9.1's primitives + `acp_compose_stack` at scale. Saves multiple client round-trips per user intent.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_hire_decision` ⭐ | `useCase`, `budgetUsdc?`, `chain?`, `maxOfferings?` | One envelope: `{ stack, ranking[], recommendation, totalCostUsdc, checkedAt }`. Sub-call count: 1 (composeStack) + N unique agents (reputation). Typically 4-7 calls. Composite score = 0.7 × reputation + 0.3 × inverse-price. |
+| `acp_safe_quote` ⭐ | `agentAddress`, `offeringName`, `chain?` | Merged envelope `{ offering, verdict, headline, reputation, arena, risk, marketplaceUrl, checkedAt }`. Runs `acp_offering` + `acp_agent_verify(depth: lite)` in parallel. 4 round trips total. |
+| `acp_portfolio_status` ⭐ | — | `{ count: 10, healthyCount, bots: [{ name, slug, role, reachable, latencyMs, error?, sampleExcerpt }] }`. Probes all 10 portfolio bots in parallel via known-reachable Resources. Bot list hardcoded in PORTFOLIO_BOTS. |
 
 ### Operations
 

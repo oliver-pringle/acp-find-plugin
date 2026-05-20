@@ -2,6 +2,54 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## 0.10.0 — 2026-05-20 — Cross-portfolio composition + OracleBot coverage + pagination
+
+Six new tools (31 → 37), four new slash commands (24 → 28). All additive; existing signatures and response shapes unchanged. MCP protocol version stays at `2025-11-25`.
+
+Backs **TheOracleBot** (10th and FINAL portfolio bot — agent `0x935e…236e`, live on droplet since 2026-05-17) by surfacing its 3 free Resources as typed MCP tools, and extends v0.9.1's safety primitives with **cross-portfolio composition** at the stack level.
+
+### Added — MCP tools
+
+- **OracleBot Resource wrappers (3 typed tools)** — gateway slug `api.acp-metabot.dev/oraclebot/v1/resources/*`. OracleBot's 8 paid `oracle_*` POST endpoints are X-API-Key gated; they stay paid on the marketplace.
+  - `acp_oracle_sources` → `GET /oraclebot/v1/resources/sourceCatalogue`. List of 4 active source readers (Chainlink AggregatorV3Interface, Pyth Network, RedStone Classic, Uniswap V3 30m TWAP) on Base mainnet. Cached 5 min.
+  - `acp_oracle_drift` → `GET /oraclebot/v1/resources/driftWindow`. 24h cross-source drift incidents. NOT cached — drift is current state; 5-min staleness would mask fresh incidents.
+  - `acp_oracle_capabilities` → `GET /oraclebot/v1/resources/capabilities`. Coverage matrix per `(chainId, tokenSymbol)`. Cached 5 min.
+- **Cross-portfolio composites (3 tools)**:
+  - `acp_hire_decision` ⭐ — runs `acp_compose_stack` + per-agent reputation lookup in parallel + ranks by composite score (0.7 × reputation + 0.3 × inverse-price). Returns ranked stack + recommendation + total cost. Sub-call count: 1 + uniqueAgents. Typically 4-7 round trips for a 5-candidate stack.
+  - `acp_safe_quote` ⭐ — runs `acp_offering(addr, name)` + `acp_agent_verify(addr, depth: 'lite')` in parallel. Saves 1 round trip on the natural "show me X, is it safe" pattern.
+  - `acp_portfolio_status` ⭐ — probes a known-reachable Resource on each of the 10 portfolio bots (TheMetaBot, ChainlinkBot, TheOracleBot, LiquidGuard, MEVProtect, EASIssuer, RevokeBot, ArenaBot, DeFiEval, AgentEval) in parallel. Returns per-bot reachability + latency + sample excerpt + aggregate `healthyCount`. Bot list hardcoded as `PORTFOLIO_BOTS` const in `server.js`; verified live 2026-05-20.
+
+### Schema updates (no new tool name)
+
+- `acp_recent_hires` gains `offset?: number` (0-1000) on its inputSchema; forwarded as `&offset=N` to `GET /v1/recentHires`. Mirrors `acp_find.offset`.
+- `acp_agent_recent_jobs` gains `offset?: number` (0-1000) on its inputSchema; forwarded to `GET /v1/agentRecentJobs`.
+
+Live probe confirmed the gateway accepts `offset` without 4xx; gateway-side honoring is implementation-dependent on Metabot (current snapshot returned `count: 0 / insufficient_history` so end-to-end slicing couldn't be verified). MCP schema pagination ships now regardless.
+
+### Added — slash commands
+
+- `/acp-find:oracle [<symbol>] [chainId:N]` — auto-routes to `acp_oracle_sources` / `_drift` / `_capabilities` by arg shape.
+- `/acp-find:hire-decision <useCase> [budget:N] [chain:<id>] [max:N]`
+- `/acp-find:safe-quote <addr> <offeringName> [chain:base|ethereum]`
+- `/acp-find:portfolio-status`
+
+Plus `/acp-find:recent-hires` and `/acp-find:agent-recent-jobs` slash bodies updated to honor a trailing `offset:N` arg.
+
+### Backward compatibility
+
+- All v0.10.0 changes are **additive**. Existing 31 tools unchanged.
+- The risk pipeline is still `DEGRADED` in production (same as v0.9.1 — LiquidGuard / RevokeBot / MEVProtect risk lanes off, reputation lane fresh). `acp_safe_quote` runs `acp_agent_verify(depth: lite)` internally which still triggers risk_snapshot — partial risk surfaces in the verdict as documented in v0.9.1.
+- MCP protocol version: `2025-11-25` (unchanged).
+- `PORTFOLIO_BOTS` const lives in `server.js` and is the source of truth for `acp_portfolio_status`. As of v0.10.0 the portfolio is at maximum 10/10 per workspace `CLAUDE.md`; future portfolio adds/removes require a new MCP release.
+
+### Verification
+
+- `npm test` → 22 tests green (15 existing + 7 new).
+- `acp_health` from a fresh `npx -y acp-find-mcp` reports `plugin.version: "0.10.0"`.
+- `acp_portfolio_status` against the live gateway returns 10 bots with `healthyCount` ≥ 9.
+- `acp_oracle_sources { chainId: 8453 }` returns 4 active sources matching the v0.5 OracleBot deployment (Chainlink / Pyth / RedStone / UniV3 TWAP).
+- `acp_hire_decision { useCase: "wallet intelligence" }` returns a non-empty `ranking[]` with at least one item carrying a non-zero `reputationScore`.
+
 ## 0.9.1 — 2026-05-20 — Risk Bundle + Marketplace Gap + Buyer Verify
 
 Eight new tools (23 → 31), six new slash commands (18 → 24). All additive; existing signatures and response shapes unchanged. MCP protocol version stays at `2025-11-25`.

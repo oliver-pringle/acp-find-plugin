@@ -464,6 +464,12 @@ const TOOLS = [
           type: "string",
           enum: ["v1", "v2"],
           description: "Optional. Restrict to one ACP marketplace. Default = both."
+        },
+        offset: {
+          type: "number",
+          description: "Skip the first N results before applying limit. 0 ≤ offset ≤ 1000. Default 0.",
+          minimum: 0,
+          maximum: 1000
         }
       }
     }
@@ -490,6 +496,12 @@ const TOOLS = [
           description: "Max jobs to return (1-100). Default 25.",
           minimum: 1,
           maximum: 100
+        },
+        offset: {
+          type: "number",
+          description: "Skip the first N results before applying limit. 0 ≤ offset ≤ 1000. Default 0.",
+          minimum: 0,
+          maximum: 1000
         }
       },
       required: ["agentAddress"]
@@ -843,7 +855,142 @@ const TOOLS = [
       },
       required: ["walletAddress"]
     }
+  },
+
+  // ===== v0.10.0 OracleBot Resource wrappers + cross-portfolio composites =====
+  // OracleBot's 3 free Resources via gateway slug /oraclebot/v1/resources/*;
+  // agreementMatrix Resource doesn't exist (404), dropped. The 8 paid POST
+  // endpoints (oracle-check/deep/attest/etc.) are X-API-Key gated — intentionally
+  // stay paid. Composites orchestrate v0.9.1's primitives + compose_stack.
+  {
+    name: "acp_oracle_sources",
+    description:
+      "List of active price-oracle source readers indexed by TheOracleBot for a given chain. Returns each source's id (chainlink | pyth | redstone | univ3_twap), display name, active flag, and a descriptive note about coverage. Use BEFORE paying for oracle-* offerings to confirm that the source(s) you need are live on the chain you care about. Free OracleBot Resource — cached 5 min.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chainId: {
+          type: "number",
+          description: "Optional. Chain ID to query (e.g. 8453 = Base mainnet, 1 = Ethereum mainnet). Defaults to 8453.",
+          minimum: 1
+        }
+      }
+    }
+  },
+  {
+    name: "acp_oracle_drift",
+    description:
+      "Cross-source price-drift incidents in the last 24 hours for a given chain. Returns `tokensWithIncidents` count + per-token incident rows. Use to answer 'what's drifted recently' or to spot tokens where on-chain price feeds have diverged. NOT cached — drift state is current; staleness would mask fresh incidents. Free OracleBot Resource.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chainId: {
+          type: "number",
+          description: "Optional. Chain ID to query. Defaults to 8453 (Base mainnet).",
+          minimum: 1
+        }
+      }
+    }
+  },
+  {
+    name: "acp_oracle_capabilities",
+    description:
+      "Coverage matrix for TheOracleBot's source readers. With `tokenSymbol`, returns which source readers can price that token on the given chain (`supportingSources[]` + `supported: boolean`). Without `tokenSymbol`, returns the full coverage matrix. Use to answer 'can OracleBot verify <token> on <chain>' before hiring `oracle_check`. Cached 5 min — coverage is stable. Free OracleBot Resource.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chainId: {
+          type: "number",
+          description: "Optional. Chain ID to query. Defaults to 8453 (Base mainnet).",
+          minimum: 1
+        },
+        tokenSymbol: {
+          type: "string",
+          description: "Optional. Narrow to a single token (e.g. 'ETH', 'USDC'). Case-insensitive."
+        }
+      }
+    }
+  },
+  {
+    name: "acp_hire_decision",
+    description:
+      "Composite hire-decision tool: runs `acp_compose_stack` to surface candidate offerings for the use case, then fetches `acp_agent_reputation` for each unique agent in parallel, then ranks the stack by a composite score (0.7 × reputation + 0.3 × inverse-price). Returns the ranked stack, a single `recommendation` (top item), and the total stack cost. Saves N+1 round trips vs. the manual flow. Sub-call count: 1 (composeStack) + uniqueAgents (reputation). Typically 4-7 calls total. Skips the heavier risk/arena legs — call `acp_agent_verify(addr)` per-candidate to drill in.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        useCase: {
+          type: "string",
+          description: "Plain-language description of what the user wants to achieve end-to-end."
+        },
+        budgetUsdc: {
+          type: "number",
+          description: "Optional cap on total USDC cost across the stack."
+        },
+        chain: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional. Restrict candidates to one or more chain ids (e.g. [\"base\"]). Up to 8 entries."
+        },
+        maxOfferings: {
+          type: "number",
+          description: "Max offerings in the stack (1-10). Default 5.",
+          minimum: 1,
+          maximum: 10
+        }
+      },
+      required: ["useCase"]
+    }
+  },
+  {
+    name: "acp_safe_quote",
+    description:
+      "Composite tool: runs `acp_offering(agentAddress, offeringName)` + `acp_agent_verify(agentAddress, depth: 'lite')` in parallel and returns a merged envelope with the offering details + a unified pre-hire verdict (STRONG_BUY / OK / CAUTION / AVOID / UNKNOWN). The natural one-call answer to 'show me this offering — is the seller safe?'. Saves 1 round-trip vs. calling the two tools separately. Sub-call count: 4 (1 offering + 3 verify-lite). `depth: lite` is hardcoded — call `acp_agent_verify(addr, depth: 'full')` for the recentJobs leg.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x + 40 hex)."
+        },
+        offeringName: {
+          type: "string",
+          description: "Exact offering name as registered on the marketplace. Matched case-insensitively."
+        },
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum"],
+          description: "Optional. Chain to evaluate risk on. Default 'base'."
+        }
+      },
+      required: ["agentAddress", "offeringName"]
+    }
+  },
+  {
+    name: "acp_portfolio_status",
+    description:
+      "Portfolio-wide health snapshot. Probes a known-reachable free Resource on each of the 10 portfolio bots in parallel (TheMetaBot, ChainlinkBot, TheOracleBot, LiquidGuard, MEVProtect, EASIssuer, RevokeBot, ArenaBot, DeFiEval, AgentEval). Returns per-bot reachability, gateway latency, a sample response excerpt, and an aggregate `healthyCount`. Bot list is hardcoded in the MCP server — see PORTFOLIO_BOTS const. Use to answer 'is the whole portfolio up?' or to diagnose a single bot's outage during a buyer flow.",
+    inputSchema: { type: "object", properties: {} }
   }
+];
+
+// --- portfolio bots (v0.10.0) ---------------------------------------------
+//
+// Hardcoded portfolio list for `acp_portfolio_status`. As of v0.10.0 the
+// portfolio is at maximum 10/10 (per workspace CLAUDE.md); if a new bot
+// is ever added, append a row here AND mention it in the CHANGELOG.
+// Probe paths verified live 2026-05-20.
+
+const PORTFOLIO_BOTS = [
+  { slug: null,           name: "TheMetaBot",     role: "Marketplace indexer + risk orchestrator + reputation",         probe: "/v1/health"                                                  },
+  { slug: "chainlinkbot", name: "ChainlinkBot",   role: "Chainlink primitives + on-chain reputation feeds (Base)",      probe: "/chainlinkbot/v1/resources/feedCatalogue?chainId=8453"       },
+  { slug: "oraclebot",    name: "TheOracleBot",   role: "Cross-source price-oracle deviation detector",                 probe: "/oraclebot/v1/resources/sourceCatalogue?chainId=8453"        },
+  { slug: "liquidguard",  name: "LiquidGuard",    role: "Aave/Compound/Morpho health-factor + liquidation distance",    probe: "/liquidguard/v1/resources/supportedProtocols"                },
+  { slug: "mevprotect",   name: "MEVProtect",     role: "Private-mempool routing (Flashbots Protect / MEV-Blocker)",    probe: "/mevprotect/v1/resources/relayStatus"                        },
+  { slug: "easissuer",    name: "EASIssuer",      role: "Generic EAS-style attestation issuer on Base mainnet",         probe: "/easissuer/v1/resources/schemaCatalogue"                     },
+  { slug: "revokebot",    name: "RevokeBot",      role: "Wallet-approvals scanner + revoke-calldata + daily watchdog",  probe: "/revokebot/v1/resources/chainCoverage"                       },
+  { slug: "arenabot",     name: "ArenaBot",       role: "Degen Arena leaderboard + AI Council indexer",                 probe: "/arenabot/v1/resources/arenaWindow"                          },
+  { slug: "defieval",     name: "DeFiEval",       role: "DeFi-agent evaluator",                                         probe: "/defieval/v1/resources/evalCapabilities"                     },
+  { slug: "agenteval",    name: "AgentEval",      role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              }
 ];
 
 // --- tool handlers ---------------------------------------------------------
@@ -1052,6 +1199,9 @@ const HANDLERS = {
     }
     const mp = normalizeMarketplace(args?.marketplace);
     if (mp) params.set("marketplace", mp);
+    if (typeof args?.offset === "number" && args.offset > 0) {
+      params.set("offset", String(Math.min(1000, Math.floor(args.offset))));
+    }
     const result = await callGateway(`/v1/recentHires?${params.toString()}`, undefined, "GET");
     decorateMarketplaceUrls(result);
     return result;
@@ -1065,6 +1215,9 @@ const HANDLERS = {
     params.set("agent", addr);
     params.set("days", String(typeof args.days === "number" ? args.days : 30));
     params.set("limit", String(typeof args.limit === "number" ? args.limit : 25));
+    if (typeof args?.offset === "number" && args.offset > 0) {
+      params.set("offset", String(Math.min(1000, Math.floor(args.offset))));
+    }
     const result = await callGateway(`/v1/agentRecentJobs?${params.toString()}`, undefined, "GET");
     if (result && typeof result === "object") result.marketplaceUrl = agentUrl(addr);
     return result;
@@ -1613,6 +1766,205 @@ const HANDLERS = {
       risk,
       recentJobs: depth === "full" ? recentJobs : null,
       marketplaceUrl: agentUrl(addr),
+      checkedAt: new Date().toISOString(),
+    };
+  },
+
+  // ===== v0.10.0 OracleBot Resource wrappers =====
+  // sourceCatalogue + capabilities are cached 5 min (stable data).
+  // driftWindow is NOT cached — 5-min staleness would mask fresh incidents.
+
+  acp_oracle_sources: async (args) => {
+    const chainId = typeof args?.chainId === "number" && args.chainId > 0 ? args.chainId : 8453;
+    const key = `oracleSources:${chainId}`;
+    const cached = cacheGet(key);
+    if (cached) { logVerbose(`cache hit: ${key}`); return cached; }
+    const result = await callGateway(
+      `/oraclebot/v1/resources/sourceCatalogue?chainId=${chainId}`, undefined, "GET");
+    cachePut(key, result);
+    return result;
+  },
+
+  acp_oracle_drift: async (args) => {
+    const chainId = typeof args?.chainId === "number" && args.chainId > 0 ? args.chainId : 8453;
+    return callGateway(
+      `/oraclebot/v1/resources/driftWindow?chainId=${chainId}`, undefined, "GET");
+  },
+
+  acp_oracle_capabilities: async (args) => {
+    const chainId = typeof args?.chainId === "number" && args.chainId > 0 ? args.chainId : 8453;
+    const tokenSymbol = typeof args?.tokenSymbol === "string" && args.tokenSymbol.trim()
+      ? args.tokenSymbol.trim().toUpperCase() : null;
+    const params = new URLSearchParams();
+    params.set("chainId", String(chainId));
+    if (tokenSymbol) params.set("tokenSymbol", tokenSymbol);
+    const key = `oracleCaps:${chainId}:${tokenSymbol ?? "*"}`;
+    const cached = cacheGet(key);
+    if (cached) { logVerbose(`cache hit: ${key}`); return cached; }
+    const result = await callGateway(
+      `/oraclebot/v1/resources/capabilities?${params.toString()}`, undefined, "GET");
+    cachePut(key, result);
+    return result;
+  },
+
+  // ===== v0.10.0 Cross-portfolio composites =====
+
+  // Compose stack + parallel reputation lookup + ranking. Light-touch by
+  // design — does NOT run agent_verify per candidate (that would burn the
+  // DEGRADED risk pipeline). Caller drills in with acp_agent_verify(addr)
+  // on the top candidate(s) before paying.
+  acp_hire_decision: async (args) => {
+    if (!args?.useCase) throw new Error("useCase is required");
+    const stack = await callGateway("/v1/composeStack", {
+      useCase: args.useCase,
+      budgetUsdc: args.budgetUsdc,
+      maxOfferings: args.maxOfferings ?? 5,
+      chain: Array.isArray(args.chain) ? args.chain : undefined,
+    }, "POST");
+
+    const items = Array.isArray(stack?.items) ? stack.items : [];
+    const uniqueAgents = [...new Set(
+      items.map(i => String(i?.agentAddress ?? "").toLowerCase()).filter(Boolean)
+    )];
+
+    const safeCall = async (fn) => {
+      try { return await fn(); }
+      catch (err) { return { error: formatError(err) }; }
+    };
+    const reputations = await Promise.all(uniqueAgents.map(addr =>
+      safeCall(() => callGateway(
+        `/v1/agentReputation?agent=${encodeURIComponent(addr)}`, undefined, "GET"))));
+    const repByAddr = Object.fromEntries(uniqueAgents.map((a, i) => [a, reputations[i]]));
+
+    const ranked = items.map((item) => {
+      const addr = String(item?.agentAddress ?? "").toLowerCase();
+      const rep = repByAddr[addr] ?? {};
+      const repScore = Number(rep?.score ?? rep?.agentScore ?? 0);
+      const price = Number(item?.priceUsdc ?? item?.priceUsd ?? 0);
+      const inversePrice = price > 0 ? Math.min(100, 1 / price) : 0;
+      const composite = 0.7 * repScore + 0.3 * (inversePrice * 100);
+      return {
+        ...item,
+        reputationScore: repScore,
+        reputationError: rep?.error ?? null,
+        compositeScore: Number(composite.toFixed(2)),
+        marketplaceUrl: addr ? agentUrl(addr) : null,
+      };
+    }).sort((a, b) => b.compositeScore - a.compositeScore);
+
+    const totalCostUsdc = ranked.reduce((s, x) => s + Number(x.priceUsdc ?? 0), 0);
+
+    return {
+      useCase: args.useCase,
+      budgetUsdc: args.budgetUsdc ?? null,
+      totalCostUsdc: Number(totalCostUsdc.toFixed(4)),
+      ranking: ranked,
+      recommendation: ranked[0] ? {
+        agentAddress: ranked[0].agentAddress,
+        agentName: ranked[0].agentName ?? null,
+        offeringName: ranked[0].offeringName,
+        priceUsdc: ranked[0].priceUsdc,
+        compositeScore: ranked[0].compositeScore,
+        marketplaceUrl: ranked[0].marketplaceUrl,
+      } : null,
+      stack,
+      checkedAt: new Date().toISOString(),
+    };
+  },
+
+  // Reuses HANDLERS.acp_agent_verify internally — dispatch-through, no
+  // code duplication. acp_offering's "fetch profile + find by name" logic
+  // is inlined here to keep this handler self-contained.
+  acp_safe_quote: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    if (!args?.offeringName) throw new Error("offeringName is required");
+    if (!isHexAddress(args.agentAddress)) {
+      throw new Error("agentAddress must be 0x followed by 40 hex chars");
+    }
+    const addr = String(args.agentAddress).trim().toLowerCase();
+    const name = String(args.offeringName).trim();
+    const chain = args.chain === "ethereum" ? "ethereum" : "base";
+
+    const safeCall = async (fn) => {
+      try { return await fn(); }
+      catch (err) { return { error: formatError(err) }; }
+    };
+
+    const [offeringResult, verifyResult] = await Promise.all([
+      safeCall(async () => {
+        const profile = await callGateway(
+          `/v1/agent/${encodeURIComponent(addr)}`, undefined, "GET");
+        const wanted = name.toLowerCase();
+        const offerings = Array.isArray(profile?.offerings) ? profile.offerings : [];
+        const offering = offerings.find(o =>
+          String(o?.offeringName ?? "").trim().toLowerCase() === wanted);
+        if (!offering) {
+          return {
+            error: "offering_not_found",
+            availableOfferings: offerings.map(o => o?.offeringName).filter(Boolean),
+          };
+        }
+        return { offering, agentName: profile?.agentName ?? null };
+      }),
+      safeCall(() => HANDLERS.acp_agent_verify({
+        walletAddress: addr, chain, depth: "lite",
+      })),
+    ]);
+
+    return {
+      agentAddress: addr,
+      offeringName: name,
+      chain,
+      offering: offeringResult,
+      verdict: verifyResult?.verdict ?? "UNKNOWN",
+      headline: verifyResult?.headline ?? "",
+      reputation: verifyResult?.reputation ?? null,
+      arena: verifyResult?.arena ?? null,
+      risk: verifyResult?.risk ?? null,
+      marketplaceUrl: agentUrl(addr),
+      checkedAt: new Date().toISOString(),
+    };
+  },
+
+  // Parallel probe across the 10-bot portfolio. Per-bot failure isolation:
+  // if one bot's Resource is unreachable, others still return.
+  acp_portfolio_status: async () => {
+    const probeOne = async (bot) => {
+      const t0 = Date.now();
+      try {
+        const url = `${API_URL}${bot.probe}`;
+        const res = await fetchWithRetry(url, {
+          method: "GET",
+          headers: { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        const latencyMs = Date.now() - t0;
+        const body = await res.text().catch(() => "");
+        if (!res.ok) {
+          return {
+            name: bot.name, slug: bot.slug, role: bot.role,
+            reachable: false, latencyMs,
+            error: `${res.status} ${res.statusText}`,
+          };
+        }
+        return {
+          name: bot.name, slug: bot.slug, role: bot.role,
+          reachable: true, latencyMs,
+          sampleExcerpt: body.slice(0, 200),
+        };
+      } catch (err) {
+        return {
+          name: bot.name, slug: bot.slug, role: bot.role,
+          reachable: false, latencyMs: Date.now() - t0,
+          error: formatError(err),
+        };
+      }
+    };
+    const bots = await Promise.all(PORTFOLIO_BOTS.map(probeOne));
+    return {
+      count: bots.length,
+      healthyCount: bots.filter(b => b.reachable).length,
+      bots,
       checkedAt: new Date().toISOString(),
     };
   },
