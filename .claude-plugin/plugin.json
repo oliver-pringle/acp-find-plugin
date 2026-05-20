@@ -1,7 +1,7 @@
 {
   "name": "acp-find",
   "version": "0.9.1",
-  "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace (V1 + V2), plus Degen Arena overlap and council-pick tracking. Helps you discover on-chain agents and offerings without leaving Claude Code.",
+  "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace (V1 + V2), plus Degen Arena overlap, portfolio risk scoring (0-100 grade A-F), marketplace gap analysis, and a one-call agent-verify pre-hire safety check. Helps you discover and evaluate on-chain agents and offerings without leaving Claude Code.",
   "author": {
     "name": "Oliver Pringle",
     "url": "https://github.com/oliver-pringle"
@@ -16,6 +16,8 @@
     "blockchain",
     "agents",
     "marketplace",
-    "search"
+    "search",
+    "risk",
+    "safety"
   ]
 }

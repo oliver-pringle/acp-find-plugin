@@ -698,6 +698,151 @@ const TOOLS = [
         }
       }
     }
+  },
+
+  // ===== v0.9.1 Risk Bundle + Marketplace Gap + Buyer Verify (8 tools) =====
+  // Backs TheMetaBot v1.8 (commit 8b17e35, 2026-05-17 — 4 risk_* offerings)
+  // and v1.9 (commit bc26684, 2026-05-18 — marketplaceGap). Plus 2 cached
+  // Resource wrappers and one client-side composite (`acp_agent_verify`).
+  {
+    name: "acp_risk_snapshot",
+    description:
+      "Composite portfolio risk score (0-100) for any EVM wallet, blended across four dimensions: healthFactor (LiquidGuard, weight 0.3), approvals (RevokeBot, 0.3), mevExposure (MEVProtect, 0.2), reputation (TheMetaBot, 0.2). Unavailable components are dropped and remaining weights renormalised — see `acp_risk_rubric` for the methodology and `acp_risk_sources` for live source health. Returns grade A-F + per-component sub-scores. Backs the Metabot v1.8 riskSnapshot offering ($0.05 on the marketplace); this MCP wrapper is free pass-through. Use as a pre-hire safety signal for any EVM wallet (not just ACP sellers).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        walletAddress: {
+          type: "string",
+          description: "EVM wallet address (0x + 40 hex). Lower- or mixed-case OK."
+        },
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum"],
+          description: "Optional. Chain to evaluate on. Default 'base'."
+        }
+      },
+      required: ["walletAddress"]
+    }
+  },
+  {
+    name: "acp_risk_deep_dive",
+    description:
+      "Full risk breakdown for an EVM wallet — same four dimensions as `acp_risk_snapshot` but with live RPC reads for sub-component context (active borrows, top approvals, recent MEV-bundled txs, reputation trajectory) plus per-dimension recommendations. Slower than snapshot (~3-5 sec); use when the snapshot returned a CAUTION-range score and the user wants the why. Backs Metabot v1.8 riskDeepDive ($0.20).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        walletAddress: {
+          type: "string",
+          description: "EVM wallet address (0x + 40 hex)."
+        },
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum"],
+          description: "Optional. Default 'base'."
+        }
+      },
+      required: ["walletAddress"]
+    }
+  },
+  {
+    name: "acp_risk_compare",
+    description:
+      "Side-by-side risk for 2-5 EVM wallets. Returns each wallet's full snapshot envelope plus a normalised ranking (top = lowest risk). Distinct from `acp_compare_agents` (which compares ACP-seller reputation + offerings) — `acp_risk_compare` works on ANY EVM wallet, not just registered ACP agents. Use to disambiguate between multiple wallet candidates when the user is hiring an agent that interacts with one of them. Backs Metabot v1.8 riskCompare ($0.10).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        walletAddresses: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 2,
+          maxItems: 5,
+          description: "EVM wallet addresses — between 2 and 5."
+        },
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum"],
+          description: "Optional. Default 'base'."
+        }
+      },
+      required: ["walletAddresses"]
+    }
+  },
+  {
+    name: "acp_risk_attestation",
+    description:
+      "Risk snapshot wrapped in a structured attestation envelope. When Metabot has published the attestation on-chain via EASIssuer (Base mainnet), the response includes `attestationUid` + `txHash` + `blockNumber` — same shape as TheOracleBot's attest_publish path. Use when the user needs to anchor a risk verdict on-chain for downstream Solidity gating (e.g. a vault that refuses deposits from wallets attested 'high risk'). Backs Metabot v1.8 riskAttestation ($1.00).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        walletAddress: {
+          type: "string",
+          description: "EVM wallet address (0x + 40 hex)."
+        },
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum"],
+          description: "Optional. Default 'base'."
+        }
+      },
+      required: ["walletAddress"]
+    }
+  },
+  {
+    name: "acp_marketplace_gap",
+    description:
+      "Ranked underserved ACP marketplace niches. Returns top-N categories by opportunityScore (saturation × inverse density), each tagged with a recommendationTag (saturated_avoid | high_volume_low_density | medium_volume_emerging | niche_underserved | balanced). Use to answer 'where should I build a new ACP bot?' or 'what does the marketplace need more of?'. Backs Metabot v1.9 marketplaceGap ($0.30).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          description: "Optional. Restrict the scan to a single canonical category (matches `acp_categories` enum)."
+        },
+        limit: {
+          type: "number",
+          description: "Max opportunities to return (1-20). Default 5.",
+          minimum: 1,
+          maximum: 20
+        }
+      }
+    }
+  },
+  {
+    name: "acp_risk_sources",
+    description:
+      "Health of every data source feeding the risk pipeline. Returns per-source status (fresh | stale | unavailable) for LiquidGuard, RevokeBot, MEVProtect, and TheMetaBot's reputation lane, plus an overall verdict (FRESH | DEGRADED | UNAVAILABLE). Use BEFORE paying for risk_snapshot when the user needs full-confidence data — DEGRADED means some component scores are missing and weights have been renormalised. Cached 5 min. Free Metabot Resource.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "acp_risk_rubric",
+    description:
+      "Methodology behind the 0-100 risk score. Returns the per-component weights (healthFactor 0.3, approvals 0.3, mevExposure 0.2, reputation 0.2), the grade bands (A=85+ / B=70+ / C=55+ / D=40+ / F), and the bucket tables used to score each dimension. Use to explain a verdict to the user or to gate downstream logic on grade rather than raw score. Cached 5 min. Free Metabot Resource.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "acp_agent_verify",
+    description:
+      "Composite pre-hire safety check for any EVM wallet. Runs reputation + arena + recentJobs + risk_snapshot in parallel and synthesises a rule-based verdict (STRONG_BUY | OK | CAUTION | AVOID | UNKNOWN) with a one-sentence headline. Saves 4 client round-trips and a buyer-side reasoning step. Errors in any sub-call are surfaced as `{ error }` inside that dimension — partial verdicts are explicitly allowed. Set `depth: 'lite'` to skip the recentJobs leg (3 sub-calls instead of 4). Default `depth: 'full'`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        walletAddress: {
+          type: "string",
+          description: "EVM wallet address (0x + 40 hex)."
+        },
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum"],
+          description: "Optional. Default 'base'."
+        },
+        depth: {
+          type: "string",
+          enum: ["lite", "full"],
+          description: "Optional. 'lite' skips recentJobs leg (3 sub-calls). Default 'full' (4)."
+        }
+      },
+      required: ["walletAddress"]
+    }
   }
 ];
 
@@ -1314,6 +1459,162 @@ const HANDLERS = {
       }
     }
     return json;
+  },
+
+  // ===== v0.9.1 Risk Bundle + Marketplace Gap + Buyer Verify =====
+  // All risk endpoints rate-limited under "public-compose" on the gateway;
+  // mirror existing thin-wrapper shape. `acp_agent_verify` is the only
+  // non-trivial entry — runs 3-4 sub-calls in parallel client-side.
+
+  acp_risk_snapshot: async (args) => {
+    if (!args?.walletAddress) throw new Error("walletAddress is required");
+    if (!isHexAddress(args.walletAddress)) {
+      throw new Error("walletAddress must be 0x followed by 40 hex chars");
+    }
+    const wallet = String(args.walletAddress).trim().toLowerCase();
+    const chain = args.chain === "ethereum" ? "ethereum" : "base";
+    return callGateway("/v1/risk/snapshot", { wallet, chain }, "POST");
+  },
+
+  acp_risk_deep_dive: async (args) => {
+    if (!args?.walletAddress) throw new Error("walletAddress is required");
+    if (!isHexAddress(args.walletAddress)) {
+      throw new Error("walletAddress must be 0x followed by 40 hex chars");
+    }
+    const wallet = String(args.walletAddress).trim().toLowerCase();
+    const chain = args.chain === "ethereum" ? "ethereum" : "base";
+    return callGateway("/v1/risk/deep-dive", { wallet, chain }, "POST");
+  },
+
+  acp_risk_compare: async (args) => {
+    const list = Array.isArray(args?.walletAddresses) ? args.walletAddresses : [];
+    if (list.length < 2) throw new Error("walletAddresses must contain at least 2 wallets");
+    if (list.length > 5) throw new Error("walletAddresses must contain at most 5 wallets");
+    for (const a of list) {
+      if (!isHexAddress(a)) throw new Error(`invalid wallet address: ${a}`);
+    }
+    const wallets = list.map((a) => String(a).trim().toLowerCase());
+    const chain = args.chain === "ethereum" ? "ethereum" : "base";
+    return callGateway("/v1/risk/compare", { wallets, chain }, "POST");
+  },
+
+  acp_risk_attestation: async (args) => {
+    if (!args?.walletAddress) throw new Error("walletAddress is required");
+    if (!isHexAddress(args.walletAddress)) {
+      throw new Error("walletAddress must be 0x followed by 40 hex chars");
+    }
+    const wallet = String(args.walletAddress).trim().toLowerCase();
+    const chain = args.chain === "ethereum" ? "ethereum" : "base";
+    return callGateway("/v1/risk/attestation", { wallet, chain }, "POST");
+  },
+
+  acp_marketplace_gap: async (args) => {
+    const body = {};
+    if (typeof args?.category === "string" && args.category.trim()) {
+      body.category = args.category.trim();
+    }
+    if (typeof args?.limit === "number" && args.limit > 0) {
+      body.limit = Math.min(20, Math.max(1, Math.floor(args.limit)));
+    }
+    return callGateway("/v1/marketplace/gap", body, "POST");
+  },
+
+  acp_risk_sources: async () => {
+    const cached = cacheGet("riskDataSourceHealth");
+    if (cached) {
+      logVerbose("cache hit: riskDataSourceHealth");
+      return cached;
+    }
+    const result = await callGateway("/v1/resources/riskDataSourceHealth", undefined, "GET");
+    cachePut("riskDataSourceHealth", result);
+    return result;
+  },
+
+  acp_risk_rubric: async () => {
+    const cached = cacheGet("riskScoreRubric");
+    if (cached) {
+      logVerbose("cache hit: riskScoreRubric");
+      return cached;
+    }
+    const result = await callGateway("/v1/resources/riskScoreRubric", undefined, "GET");
+    cachePut("riskScoreRubric", result);
+    return result;
+  },
+
+  // Composite. Runs 3 (depth=lite) or 4 (depth=full) sub-calls in parallel,
+  // each wrapped in safeCall so a sub-failure surfaces as `{ error }` inside
+  // that dimension instead of failing the whole call. Verdict is rule-based —
+  // see docs/superpowers/specs/2026-05-20-acp-find-mcp-v0.9.1-design.md §5.
+  acp_agent_verify: async (args) => {
+    if (!args?.walletAddress) throw new Error("walletAddress is required");
+    if (!isHexAddress(args.walletAddress)) {
+      throw new Error("walletAddress must be 0x followed by 40 hex chars");
+    }
+    const addr = String(args.walletAddress).trim().toLowerCase();
+    const chain = args.chain === "ethereum" ? "ethereum" : "base";
+    const depth = args.depth === "lite" ? "lite" : "full";
+
+    const safeCall = async (fn) => {
+      try { return await fn(); }
+      catch (err) { return { error: formatError(err) }; }
+    };
+
+    const calls = [
+      safeCall(() => callGateway(
+        `/v1/agentReputation?agent=${encodeURIComponent(addr)}`, undefined, "GET")),
+      safeCall(() => callGateway(
+        `/v1/agent/${encodeURIComponent(addr)}/arena`, undefined, "GET")),
+      safeCall(() => callGateway(
+        "/v1/risk/snapshot", { wallet: addr, chain }, "POST")),
+    ];
+    if (depth === "full") {
+      calls.push(safeCall(() => callGateway(
+        `/v1/agentRecentJobs?agent=${encodeURIComponent(addr)}&days=30&limit=10`,
+        undefined, "GET")));
+    }
+    const [reputation, arena, risk, recentJobs] = await Promise.all(calls);
+
+    const repScore = Number(reputation?.score ?? reputation?.agentScore ?? 0);
+    const riskScore = Number(risk?.score ?? 0);
+    const jobs30d = recentJobs?.error
+      ? null
+      : Number(recentJobs?.count ?? (Array.isArray(recentJobs?.jobs) ? recentJobs.jobs.length : 0));
+
+    let verdict;
+    if (reputation?.error || risk?.error) verdict = "UNKNOWN";
+    else if (repScore >= 80 && riskScore >= 70 && (jobs30d === null || jobs30d >= 10)) verdict = "STRONG_BUY";
+    else if (repScore >= 60 && riskScore >= 55) verdict = "OK";
+    else if (repScore <  40 && riskScore <  40) verdict = "AVOID";
+    else if (repScore >= 40 || riskScore >= 40) verdict = "CAUTION";
+    else verdict = "UNKNOWN";
+
+    const repPart = reputation?.error ? "no reputation" : `reputation ${repScore}/100`;
+    const riskPart = risk?.error
+      ? "no risk data"
+      : `risk ${riskScore}/100${risk?.verdict ? ` (${risk.verdict})` : ""}`;
+    const arenaPart = arena?.error || arena?.isParticipant === false
+      ? "not in Arena"
+      : `Arena #${arena?.rank30d ?? "?"} (30d)`;
+    const jobsPart = depth === "lite"
+      ? null
+      : recentJobs?.error
+        ? "no recent-jobs feed"
+        : `${jobs30d ?? 0} jobs in last 30d`;
+    const headline = [repPart, riskPart, arenaPart, jobsPart].filter(Boolean).join(", ") + ".";
+
+    return {
+      agentAddress: addr,
+      chain,
+      depth,
+      verdict,
+      headline,
+      reputation,
+      arena,
+      risk,
+      recentJobs: depth === "full" ? recentJobs : null,
+      marketplaceUrl: agentUrl(addr),
+      checkedAt: new Date().toISOString(),
+    };
   },
 };
 

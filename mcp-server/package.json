@@ -1,7 +1,7 @@
 {
   "name": "acp-find-mcp",
   "version": "0.9.1",
-  "description": "MCP server for searching the Virtuals Protocol ACP marketplace + Degen Arena. Exposes 23 tools — search, compose-stack, agent-reputation (+ history), today, browse-agent, offering deep-dive, compare-agents, watch-status, recent-hires, agent-recent-jobs, search-agents, categories, health, agent-resources, resources-search, resource-call, estimate-stack-cost, agent-feed-address, arena-check, arena-leaderboard, arena-council-picks, arena-overlap — backed by the public api.acp-metabot.dev gateway. Works in Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop.",
+  "description": "MCP server for searching the Virtuals Protocol ACP marketplace + Degen Arena + portfolio risk scoring. Exposes 31 tools — search, compose-stack, agent-reputation (+ history), today, browse-agent, offering deep-dive, compare-agents, watch-status, recent-hires, agent-recent-jobs, search-agents, categories, health, agent-resources, resources-search, resource-call, estimate-stack-cost, agent-feed-address, arena-check/leaderboard/council-picks/overlap, risk-snapshot/deep-dive/compare/attestation, risk-sources, risk-rubric, marketplace-gap, agent-verify (one-call pre-hire safety check) — backed by the public api.acp-metabot.dev gateway. Works in Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop.",
   "type": "module",
   "main": "server.js",
   "bin": {
@@ -29,6 +29,8 @@
     "defi",
     "marketplace",
     "search",
+    "risk",
+    "safety",
     "claude",
     "cursor",
     "cline",

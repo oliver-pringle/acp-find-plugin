@@ -11,6 +11,32 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.9.1
+
+Eight new tools (23 → 31), six new slash commands (18 → 24), and the largest single batch of buyer-side intelligence since the Resources end-to-end ship in v0.8.0. All additive — no existing tool signatures or response shapes changed. Backs **TheMetaBot v1.8** (Portfolio Risk pipeline, commit `8b17e35`) and **v1.9** (Marketplace pack, commit `bc26684`).
+
+1. **Risk Bundle (4 tools).** Composite 0-100 risk scoring across four sub-bots (LiquidGuard + RevokeBot + MEVProtect + TheMetaBot reputation). Grade A-F. All four tools are free MCP pass-throughs to the same endpoints that back TheMetaBot's paid `risk_*` offerings on the marketplace — the paid version adds escrow + on-chain attestation, not the data itself.
+   - `acp_risk_snapshot` — composite score (`POST /v1/risk/snapshot`).
+   - `acp_risk_deep_dive` — full sub-component breakdown with live RPC reads + recommendations (`POST /v1/risk/deep-dive`).
+   - `acp_risk_compare` — side-by-side risk for 2-5 EVM wallets (`POST /v1/risk/compare`). Works on ANY wallet, not just ACP sellers — distinct from `acp_compare_agents`.
+   - `acp_risk_attestation` — risk snapshot in a structured attestation envelope; may include `attestationUid` + `txHash` + `blockNumber` when Metabot has published on-chain via EASIssuer (`POST /v1/risk/attestation`).
+
+2. **Marketplace Intelligence (1 tool).**
+   - `acp_marketplace_gap` — ranked underserved categories by `opportunityScore` with a `recommendationTag` (`saturated_avoid` / `high_volume_low_density` / `medium_volume_emerging` / `niche_underserved` / `balanced`). Answers "where should I build a new ACP bot?".
+
+3. **Risk Diagnostics (2 Resource wrappers, cached 5 min).**
+   - `acp_risk_sources` — live per-source health + overall verdict (`FRESH` / `DEGRADED` / `UNAVAILABLE`). Pre-check before paying for `risk_snapshot` when sub-fresh data would compromise the use case.
+   - `acp_risk_rubric` — methodology (weights, grade bands, bucket tables). Use to explain a verdict or gate downstream logic on grade rather than raw score.
+
+4. **Composite intelligence (1 tool).**
+   - `acp_agent_verify` ⭐ — runs reputation + arena + recent jobs + risk_snapshot in parallel and synthesises a rule-based verdict (`STRONG_BUY` / `OK` / `CAUTION` / `AVOID` / `UNKNOWN`). Saves 4 client round-trips per pre-hire safety check. Set `depth: 'lite'` to skip recentJobs (3 sub-calls instead of 4).
+
+### v0.9.1 backward-compatibility notes
+
+- All v0.9.1 changes are **additive**. Existing 23 tools have identical signatures and response shapes.
+- The risk pipeline is currently `DEGRADED` in production (LiquidGuard / RevokeBot / MEVProtect lanes off; reputation lane fresh). `acp_risk_snapshot` works against the degraded pipeline — sub-component scores are renormalised over available components per the rubric. Operator flips the missing lanes by configuring `RiskOrchestrator__*Endpoint` env vars to the respective bot URLs on `acp-shared`.
+- MCP protocol version stays at `2025-11-25`. No client-side config or env changes — new tools appear in `tools/list` automatically once you upgrade.
+
 ## What's new in v0.9.0
 
 Four new tools (19 → 23) backed by **TheMetaBot v1.7** (Arena indexer release). All changes are **additive**: no existing tool signatures, response shapes, or behaviour changed.
@@ -59,7 +85,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (23)
+## Tools (31)
 
 ### Search & discovery
 
@@ -125,6 +151,21 @@ The Degen Arena is Virtuals' AI trading competition on Hyperliquid + HIP-3 — a
 | `acp_arena_leaderboard` | `limit?` (1-500, default 50) | Current Arena Top-N ordered by 30d rank ascending (lower = better). Top-level `count`; each `agents[]` row carries `agentAddress`, `rankLifetime`, `rank30d`, `pnl30dUsd`, `lastWeekPick`, `lastObservedAt`, `marketplaceUrl`. |
 | `acp_arena_council_picks` | `weeks?` (1-26, default 4) | Weekly AI Council Top-10 picks, grouped by `weekStart` descending. Top-level `weeks`; each `data[]` row: `weekStart` + `picks: [{ agentAddress, pickRank }]` (pickRank 1..10). |
 | `acp_arena_overlap` | `topN?` (10-500, default 50) | Cross-section: of the Top-`topN` Arena agents, which ones also sell on the ACP marketplace. Top-level `arenaTopN`, `arenaSampled`, `sellingOnAcp`, `overlapFraction`; each `agents[]` row: `agentAddress`, `arenaRank30d`, `offeringCount`, `marketplaceUrl`. |
+
+### Risk, safety, and marketplace intelligence (v0.9.1)
+
+Wraps TheMetaBot v1.8 portfolio-risk pipeline + v1.9 marketplace pack. Risk endpoints work on ANY EVM wallet (not just registered ACP agents). All eight tools are additive — existing tool signatures are unchanged.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_risk_snapshot` | `walletAddress`, `chain?` (`base`\|`ethereum`, default `base`) | Composite 0-100 risk score blended from `healthFactor` (LiquidGuard, weight 0.3), `approvals` (RevokeBot, 0.3), `mevExposure` (MEVProtect, 0.2), `reputation` (TheMetaBot, 0.2). Returns grade A-F + per-component sub-scores with `status` (fresh/stale/unavailable). When components are unavailable, weights are renormalised — see `acp_risk_rubric`. |
+| `acp_risk_deep_dive` | `walletAddress`, `chain?` | Full sub-component breakdown with live RPC reads (active borrows, top approvals, recent MEV-bundled txs, reputation trajectory) + per-dimension recommendations. ~3-5 sec per call. |
+| `acp_risk_compare` | `walletAddresses` (2-5), `chain?` | Side-by-side risk for 2-5 EVM wallets. Distinct from `acp_compare_agents` (which compares ACP-seller reputation + offerings) — `risk_compare` works on any wallet. |
+| `acp_risk_attestation` | `walletAddress`, `chain?` | Risk snapshot wrapped in a structured attestation envelope. Includes `attestationUid` + `txHash` + `blockNumber` when Metabot has published the attestation on-chain via EASIssuer (Base mainnet). |
+| `acp_marketplace_gap` | `category?`, `limit?` (1-20, default 5) | Ranked underserved ACP categories by `opportunityScore` (saturation × inverse density). Each row carries `recommendationTag` ∈ {`saturated_avoid`, `high_volume_low_density`, `medium_volume_emerging`, `niche_underserved`, `balanced`}. Answers "where should I build a new ACP bot?". |
+| `acp_risk_sources` | — | Per-source health (`fresh`/`stale`/`unavailable`) for LiquidGuard, RevokeBot, MEVProtect, and TheMetaBot's reputation lane, plus an overall `verdict` (`FRESH` / `DEGRADED` / `UNAVAILABLE`). Cached 5 min. Free Metabot Resource. |
+| `acp_risk_rubric` | — | Methodology behind the score: weights per component, grade bands (A=85+ / B=70+ / C=55+ / D=40+ / F), bucket tables. Cached 5 min. Free Metabot Resource. |
+| `acp_agent_verify` ⭐ | `walletAddress`, `chain?`, `depth?` (`lite`/`full`, default `full`) | **Composite pre-hire safety check.** Runs reputation + arena + recentJobs + risk_snapshot in parallel and synthesises a rule-based verdict (`STRONG_BUY` / `OK` / `CAUTION` / `AVOID` / `UNKNOWN`) + headline. `depth: 'lite'` skips recentJobs (3 sub-calls instead of 4). Errors in any sub-call surface as `{ error }` inside that dimension; partial verdicts are explicitly allowed. |
 
 ### Operations
 

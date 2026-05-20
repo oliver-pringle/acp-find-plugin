@@ -69,6 +69,7 @@ const EXPECTED_TOOLS = [
   "acp_agent_reputation",
   "acp_agent_reputation_history",
   "acp_agent_resources",
+  "acp_agent_verify",
   "acp_arena_check",
   "acp_arena_council_picks",
   "acp_arena_leaderboard",
@@ -80,10 +81,17 @@ const EXPECTED_TOOLS = [
   "acp_estimate_stack_cost",
   "acp_find",
   "acp_health",
+  "acp_marketplace_gap",
   "acp_offering",
   "acp_recent_hires",
   "acp_resource_call",
   "acp_resources_search",
+  "acp_risk_attestation",
+  "acp_risk_compare",
+  "acp_risk_deep_dive",
+  "acp_risk_rubric",
+  "acp_risk_snapshot",
+  "acp_risk_sources",
   "acp_search_agents",
   "acp_today",
   "acp_watch_status"
@@ -112,7 +120,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 23 tools with required schemas", async () => {
+test("tools/list returns all 31 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -281,6 +289,167 @@ test("ping responds with empty result", async () => {
     });
     const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "ping" });
     assert.deepEqual(r.result, {});
+  } finally {
+    conn.close();
+  }
+});
+
+// ===== v0.9.1 tests =====
+
+test("acp_risk_snapshot validates walletAddress shape", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r1 = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_risk_snapshot", arguments: {} }
+    });
+    assert.equal(r1.result.isError, true);
+    assert.match(r1.result.content[0].text, /walletAddress is required/);
+
+    const r2 = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "acp_risk_snapshot", arguments: { walletAddress: "0xnotahex" } }
+    });
+    assert.equal(r2.result.isError, true);
+    assert.match(r2.result.content[0].text, /0x followed by 40 hex chars/);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_risk_compare validates 2..5 wallets", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const tooFew = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: {
+        name: "acp_risk_compare",
+        arguments: { walletAddresses: ["0x1111111111111111111111111111111111111111"] }
+      }
+    });
+    assert.equal(tooFew.result.isError, true);
+    assert.match(tooFew.result.content[0].text, /at least 2 wallets/);
+
+    const tooMany = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: {
+        name: "acp_risk_compare",
+        arguments: {
+          walletAddresses: [
+            "0x1111111111111111111111111111111111111111",
+            "0x2222222222222222222222222222222222222222",
+            "0x3333333333333333333333333333333333333333",
+            "0x4444444444444444444444444444444444444444",
+            "0x5555555555555555555555555555555555555555",
+            "0x6666666666666666666666666666666666666666"
+          ]
+        }
+      }
+    });
+    assert.equal(tooMany.result.isError, true);
+    assert.match(tooMany.result.content[0].text, /at most 5 wallets/);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_marketplace_gap exposes correct limit clamp + category schema", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const tool = r.result.tools.find(t => t.name === "acp_marketplace_gap");
+    assert.ok(tool, "acp_marketplace_gap should be in tools/list");
+    assert.equal(tool.inputSchema.properties.limit.minimum, 1);
+    assert.equal(tool.inputSchema.properties.limit.maximum, 20);
+    assert.equal(tool.inputSchema.properties.category.type, "string");
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_agent_verify validates walletAddress and supports depth=lite", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const noAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_agent_verify", arguments: {} }
+    });
+    assert.equal(noAddr.result.isError, true);
+    assert.match(noAddr.result.content[0].text, /walletAddress is required/);
+
+    // Network calls will fail (ACP_API_URL=http://127.0.0.1:1) but the handler
+    // should still produce a verdict envelope with `error` in each sub-field
+    // and verdict: "UNKNOWN".
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: {
+        name: "acp_agent_verify",
+        arguments: {
+          walletAddress: "0x1111111111111111111111111111111111111111",
+          depth: "lite"
+        }
+      }
+    });
+    assert.equal(r.result.isError, undefined,
+      "verify should not surface as isError even when sub-calls fail");
+    const parsed = JSON.parse(r.result.content[0].text);
+    assert.equal(parsed.depth, "lite");
+    assert.equal(parsed.recentJobs, null, "lite depth must omit recentJobs");
+    assert.equal(parsed.verdict, "UNKNOWN");
+    assert.ok(parsed.reputation?.error,
+      "sub-call errors must surface in dimension envelope");
+    assert.ok(parsed.risk?.error);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_risk_rubric and acp_risk_sources expose empty input schemas", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const rubric = r.result.tools.find(t => t.name === "acp_risk_rubric");
+    const sources = r.result.tools.find(t => t.name === "acp_risk_sources");
+    assert.ok(rubric && Object.keys(rubric.inputSchema.properties ?? {}).length === 0);
+    assert.ok(sources && Object.keys(sources.inputSchema.properties ?? {}).length === 0);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_risk_attestation validates address shape", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_risk_attestation", arguments: { walletAddress: "not-a-wallet" } }
+    });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /0x followed by 40 hex chars/);
   } finally {
     conn.close();
   }

@@ -2,19 +2,52 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
-## 0.9.1 — 2026-05-18 — OracleSentinelBot landed (10th + FINAL portfolio bot)
+## 0.9.1 — 2026-05-20 — Risk Bundle + Marketplace Gap + Buyer Verify
 
-No tool, schema, or behaviour change — `tools/list` is identical between v0.9.0 and v0.9.1.
+Eight new tools (23 → 31), six new slash commands (18 → 24). All additive; existing signatures and response shapes unchanged. MCP protocol version stays at `2025-11-25`.
 
-Portfolio context update only. **TheOracleBot** (cross-source price-oracle deviation detector — 10th and FINAL portfolio bot, agent ID `019e3815-fc40-7639-95a3-d6a6a4c02a26`, wallet `0x935e97046b10832664d007430c7b7fd310a6236e`) is live on droplet as of 2026-05-17. 8 paid offerings + 3 free Resources reachable via the existing 23 tools — no plugin changes needed:
+### Added — MCP tools
 
-- `acp_browse_agent { walletAddress: "0x935e..." }` → returns agent profile + offerings once marketplace registration is complete
-- `acp_agent_resources` → `driftWindow`, `sourceCatalogue`, `agreementMatrix`
-- `acp_resource_call` → routes via the existing gateway at `api.acp-metabot.dev/oraclebot/v1/resources/*`
-- `acp_resources_search "oracle"` → cross-agent surface includes the new resources
-- `acp_today` → will list OracleBot once at least one offering registers
+- **Risk bundle (4 tools)** wrapping TheMetaBot v1.8 portfolio-risk pipeline (commit `8b17e35`, 2026-05-17):
+  - `acp_risk_snapshot` → `POST /v1/risk/snapshot`. Composite 0-100 score (healthFactor + approvals + mevExposure + reputation; rubric-defined weights, grade A-F).
+  - `acp_risk_deep_dive` → `POST /v1/risk/deep-dive`. Full sub-component breakdown with live RPC reads.
+  - `acp_risk_compare` → `POST /v1/risk/compare`. Side-by-side risk for 2-5 wallets (distinct from `acp_compare_agents` which compares ACP-sellers — this works on any EVM wallet).
+  - `acp_risk_attestation` → `POST /v1/risk/attestation`. Includes EAS UID + txHash when published on-chain.
+- **Marketplace intelligence (1 tool)** wrapping TheMetaBot v1.9 (commit `bc26684`, 2026-05-18):
+  - `acp_marketplace_gap` → `POST /v1/marketplace/gap`. Ranked underserved niches by `opportunityScore` + `recommendationTag`.
+- **Risk diagnostics (2 Resource wrappers, cached 5 min)**:
+  - `acp_risk_sources` → `GET /v1/resources/riskDataSourceHealth`. Live per-source health + overall verdict (`FRESH` / `DEGRADED` / `UNAVAILABLE`).
+  - `acp_risk_rubric` → `GET /v1/resources/riskScoreRubric`. Methodology (weights, grade bands, bucket tables).
+- **Composite intelligence (1 tool)**:
+  - `acp_agent_verify` ⭐ — runs reputation + arena + recent jobs + risk_snapshot in parallel, returns a unified envelope with a rule-based verdict (`STRONG_BUY` / `OK` / `CAUTION` / `AVOID` / `UNKNOWN`). `depth: 'lite'` skips recentJobs leg.
 
-Five sibling bots gained cross-bot `_oracle`-suffixed offerings that consume TheOracleBot internally over `acp-shared`: `mev_protect_oracle`, `mev_check_oracle`, `price_feed_verified`, `peg_status_verified`, `hf_check_oracle` — all reachable via the same plugin tools by agent address.
+### Added — slash commands
+
+- `/acp-find:risk <addr>`
+- `/acp-find:risk-deep <addr>`
+- `/acp-find:risk-compare <addr1> <addr2> ...`
+- `/acp-find:risk-attestation <addr>`
+- `/acp-find:marketplace-gap [<category>] [limit:N]`
+- `/acp-find:verify <addr> [depth:lite|full]`
+
+(Resource wrappers `acp_risk_sources` / `acp_risk_rubric` do not get dedicated slash commands — they're diagnostic surfaces best invoked from the MCP tool directly.)
+
+### Portfolio context (rolled forward from the prior 0.9.1 placeholder)
+
+**TheOracleBot** (10th + FINAL portfolio bot, agent ID `019e3815-fc40-7639-95a3-d6a6a4c02a26`, wallet `0x935e97046b10832664d007430c7b7fd310a6236e`) went live on droplet 2026-05-17. Its 3 free Resources (`driftWindow`, `sourceCatalogue`, `agreementMatrix`) are reachable today via the existing `acp_resource_call` MCP tool at gateway slug `api.acp-metabot.dev/oraclebot/v1/resources/*`. Typed OracleBot wrappers are deferred to v0.10.0 (bundled with TheMetaBot v1.10 Smart Search). Five sibling bots gained cross-bot `_oracle`-suffixed offerings that consume TheOracleBot internally over `acp-shared`: `mev_protect_oracle`, `mev_check_oracle`, `price_feed_verified`, `peg_status_verified`, `hf_check_oracle` — all reachable via the same plugin tools by agent address.
+
+### Backward compatibility
+
+- All v0.9.1 changes are **additive**. Existing 23 tools unchanged.
+- The risk pipeline is currently `DEGRADED` in production (LiquidGuard / RevokeBot / MEVProtect lanes off; reputation lane fresh). `acp_risk_snapshot` works against the degraded pipeline — sub-component scores are renormalised over available components per the rubric. Operator flips the missing lanes by configuring `RiskOrchestrator__*Endpoint` env vars to the respective bot URLs on `acp-shared`.
+- MCP protocol version: `2025-11-25` (unchanged).
+
+### Verification
+
+- `npm test` → 15 tests green (9 existing + 6 new).
+- `acp_health` from a fresh `npx -y acp-find-mcp` reports `plugin.version: "0.9.1"`.
+- `acp_risk_sources` returns the **current** gateway verdict (proves the wrapper isn't synthetic).
+- `acp_agent_verify` against TheMetaBot itself (`0xecf9…558c`) returns `STRONG_BUY` or `OK` with all four sub-objects populated.
 
 ## 0.8.1 — 2026-05-12 — npm README sync
 
