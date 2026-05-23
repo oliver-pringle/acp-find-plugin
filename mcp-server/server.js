@@ -1428,10 +1428,20 @@ const HANDLERS = {
         method: "GET",
         headers: { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        redirect: "manual",
       });
     } catch (err) {
       throw new Error(
         `Resource call to ${callUrl.toString()} failed: ${err.message}`
+      );
+    }
+    // Refuse to follow redirects — auto-follow would re-open the SSRF path
+    // (public host 302 → 169.254.169.254). Resources should be direct endpoints.
+    if (resp.status >= 300 && resp.status < 400) {
+      const location = resp.headers.get("location") || "(no Location header)";
+      throw new Error(
+        `Resource "${name}" returned ${resp.status} redirect to ${location}; ` +
+        `acp_resource_call refuses to follow redirects to prevent SSRF bypass.`
       );
     }
     if (!resp.ok) {

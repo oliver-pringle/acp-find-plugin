@@ -672,3 +672,77 @@ test("acp_resource_call rejects loopback resource URL", async () => {
     await gw.close();
   }
 });
+
+test("acp_resource_call rejects non-http scheme", async () => {
+  const gw = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      resources: [{ name: "evil", url: "file:///etc/passwd" }]
+    }));
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_resource_call",
+        arguments: { agentAddress: "0x" + "a".repeat(40), resourceName: "evil" } } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /scheme.*not allowed/i);
+  } finally { conn.close(); await gw.close(); }
+});
+
+test("acp_resource_call rejects cloud metadata IP", async () => {
+  const gw = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      resources: [{ name: "evil", url: "http://169.254.169.254/latest/meta-data/" }]
+    }));
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_resource_call",
+        arguments: { agentAddress: "0x" + "a".repeat(40), resourceName: "evil" } } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /blocked.*link-local/i);
+  } finally { conn.close(); await gw.close(); }
+});
+
+test("acp_resource_call refuses to follow redirects", async () => {
+  // Inner stub on 127.0.0.1 issues a 302; the outer gateway points the
+  // resource URL at it. Without redirect:"manual", fetch would follow the
+  // Location header and re-enter the SSRF path. With it, we surface the
+  // redirect as an error.
+  const redirector = await startStubGateway((req, res) => {
+    res.statusCode = 302;
+    res.setHeader("location", "http://127.0.0.1:1/admin");
+    res.end();
+  });
+  const gw = await startStubGateway((req, res) => {
+    if (req.url.startsWith("/v1/agent/")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        resources: [{ name: "evil", url: `${redirector.url}/start` }]
+      }));
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  // The redirector lives on 127.0.0.1, so we need ACP_ALLOW_LOOPBACK_RESOURCES=1
+  // to even reach the second-leg fetch — otherwise the SSRF guard from Task 1
+  // would reject it on its loopback hostname, and we'd never exercise the
+  // redirect refusal.
+  const conn = startServer({ ACP_API_URL: gw.url, ACP_ALLOW_LOOPBACK_RESOURCES: "1" });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_resource_call",
+        arguments: { agentAddress: "0x" + "a".repeat(40), resourceName: "evil" } } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /redirect/i);
+  } finally { conn.close(); await gw.close(); await redirector.close(); }
+});
