@@ -156,7 +156,7 @@ function classifyIp(ip) {
     const lower = ip.toLowerCase();
     if (lower === "::1") return "loopback";
     if (lower === "::") return "unspecified";
-    if (lower.startsWith("fe80:") || lower.startsWith("fe80::")) return "link-local";
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return "link-local";
     if (/^f[cd]/.test(lower)) return "unique-local";
     if (lower.startsWith("ff")) return "multicast";
     return "public";

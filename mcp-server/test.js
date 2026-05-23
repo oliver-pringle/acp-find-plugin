@@ -666,7 +666,7 @@ test("acp_resource_call rejects loopback resource URL", async () => {
       }
     });
     assert.equal(r.result.isError, true);
-    assert.match(r.result.content[0].text, /blocked.*loopback|private|link-local/i);
+    assert.match(r.result.content[0].text, /blocked.*(loopback|private|link-local)/i);
   } finally {
     conn.close();
     await gw.close();
