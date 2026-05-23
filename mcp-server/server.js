@@ -16,6 +16,8 @@ import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIPv4, isIPv6 } from "node:net";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf-8"));
@@ -120,6 +122,77 @@ function normalizeMarketplace(raw) {
 
 function isHexAddress(s) {
   return typeof s === "string" && /^0x[0-9a-fA-F]{40}$/.test(s.trim());
+}
+
+// --- SSRF guard --------------------------------------------------------------
+// Blocks acp_resource_call from being weaponised into a request-from-MCP-host
+// vector. Default-deny on non-HTTP schemes and any IP resolving to loopback /
+// private / link-local / multicast / cloud-metadata ranges. Opt out for local-dev
+// against a localhost bot via ACP_ALLOW_LOOPBACK_RESOURCES=1.
+
+const ALLOW_LOOPBACK_RESOURCES = !!process.env.ACP_ALLOW_LOOPBACK_RESOURCES;
+
+// Convert "10.0.0.5" / "::ffff:10.0.0.5" to a tag describing what range it falls in.
+// Returns "public" if the IP is none of the blocked ranges.
+function classifyIp(ip) {
+  if (typeof ip !== "string") return "invalid";
+  const v4mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (v4mapped) return classifyIp(v4mapped[1]);
+
+  if (isIPv4(ip)) {
+    const parts = ip.split(".").map(Number);
+    const [a, b] = parts;
+    if (a === 127) return "loopback";
+    if (a === 0) return "this-network";
+    if (a === 10) return "private";
+    if (a === 172 && b >= 16 && b <= 31) return "private";
+    if (a === 192 && b === 168) return "private";
+    if (a === 169 && b === 254) return "link-local";
+    if (a >= 224 && a <= 239) return "multicast";
+    if (ip === "255.255.255.255") return "broadcast";
+    return "public";
+  }
+  if (isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    if (lower === "::1") return "loopback";
+    if (lower === "::") return "unspecified";
+    if (lower.startsWith("fe80:") || lower.startsWith("fe80::")) return "link-local";
+    if (/^f[cd]/.test(lower)) return "unique-local";
+    if (lower.startsWith("ff")) return "multicast";
+    return "public";
+  }
+  return "invalid";
+}
+
+// Validate a Resource URL before fetching. Throws with a clear message on any
+// blocked condition; returns the resolved IP on success. TOCTOU caveat: between
+// resolve and connect, DNS could change. Strict pin would need a custom undici
+// Dispatcher — accepted for v0.10.1 scope.
+async function validateResourceUrl(rawUrl) {
+  let u;
+  try { u = new URL(rawUrl); }
+  catch { throw new Error(`Resource URL is not a valid URL: ${rawUrl}`); }
+
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(`Resource URL scheme "${u.protocol}" is not allowed (only http:/https:)`);
+  }
+
+  let resolved;
+  try {
+    resolved = await dnsLookup(u.hostname, { all: true });
+  } catch (err) {
+    throw new Error(`Resource hostname "${u.hostname}" did not resolve: ${err.message}`);
+  }
+  for (const { address } of resolved) {
+    const cls = classifyIp(address);
+    if (cls === "public") continue;
+    if (cls === "loopback" && ALLOW_LOOPBACK_RESOURCES) continue;
+    throw new Error(
+      `Resource URL blocked: ${u.hostname} resolves to ${address} (${cls}). ` +
+      `Set ACP_ALLOW_LOOPBACK_RESOURCES=1 for local-dev against a loopback bot.`
+    );
+  }
+  return resolved[0].address;
 }
 
 // --- transport -------------------------------------------------------------
@@ -1342,6 +1415,10 @@ const HANDLERS = {
         typeof v === "object" ? JSON.stringify(v) : String(v)
       );
     }
+
+    // SSRF guard — resolve hostname, block loopback / private / link-local /
+    // multicast / cloud-metadata ranges. http(s) only. Throws on any block.
+    await validateResourceUrl(callUrl.toString());
 
     // Leg 2 — direct call. Reuse the same timeout the gateway uses.
     logVerbose(`→ resource call ${name} on ${addr}: ${callUrl.toString()}`);

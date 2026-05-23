@@ -11,6 +11,27 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+
+// Spin up a one-shot HTTP stub gateway. Returns { url, close, requestLog }.
+// Hands `responder(req, res)` every request so each test programs its own behaviour.
+function startStubGateway(responder) {
+  const requestLog = [];
+  const server = createServer((req, res) => {
+    requestLog.push({ method: req.method, url: req.url });
+    responder(req, res);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      resolve({
+        url: `http://127.0.0.1:${port}`,
+        close: () => new Promise((r) => server.close(r)),
+        requestLog,
+      });
+    });
+  });
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER = resolve(__dirname, "server.js");
@@ -617,5 +638,37 @@ test("acp_oracle_drift accepts chainId and produces gateway error on broken URL"
     assert.equal(r.result.isError, true);
   } finally {
     conn.close();
+  }
+});
+
+test("acp_resource_call rejects loopback resource URL", async () => {
+  const gw = await startStubGateway((req, res) => {
+    if (req.url.startsWith("/v1/agent/")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        resources: [{ name: "evil", url: "http://127.0.0.1:1/admin" }]
+      }));
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: {
+        name: "acp_resource_call",
+        arguments: { agentAddress: "0x" + "a".repeat(40), resourceName: "evil" }
+      }
+    });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /blocked.*loopback|private|link-local/i);
+  } finally {
+    conn.close();
+    await gw.close();
   }
 });
