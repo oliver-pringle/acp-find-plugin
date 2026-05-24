@@ -616,6 +616,45 @@ const TOOLS = [
           type: "string",
           enum: ["v1", "v2"],
           description: "Optional. Restrict results to one ACP marketplace. Default = both V1 and V2 (recommended; V2 is the new generation of agents). Pass 'v1' to search only the legacy V1 corpus, or 'v2' to search only V2 agents."
+        },
+        excludeRequirements: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional. Skip offerings whose requirement schema contains any of these substrings (max 50 entries; each ≤ 200 chars). Phase 1 negative filter."
+        },
+        excludeAgents: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional. Skip offerings from these agent wallets (max 50; each must be 0x + 40 hex). Phase 1 negative filter."
+        },
+        excludeChains: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional. Skip offerings on these chains (max 50; e.g. 'polygon', '137'). Phase 1 negative filter."
+        },
+        maxPriceUsd: {
+          type: "number",
+          description: "Optional. Hard cap on offering price in USD (0..100000). Phase 1 — superset of priceMaxUsdc; both are accepted by the gateway."
+        },
+        includeResources: {
+          type: "boolean",
+          description: "Optional. Surface free Resources alongside paid offerings (default true). Phase 1 unified search."
+        },
+        expand: {
+          type: "boolean",
+          description: "Optional. Run LLM query rewriter (Phase 3 only — default false; off when the daily $0.50 cap is breached). Adds `expansion` field to the response when on."
+        },
+        includeRisk: {
+          type: "boolean",
+          description: "Optional. Surface a per-hit `riskFlag` (low/medium/high/critical) using TheMetaBot's AgentRiskScorer (Phase 3+)."
+        },
+        requiresField: {
+          type: "string",
+          description: "Optional. Match only offerings whose requirement schema declares this top-level field (identifier-shape only, ≤ 80 chars). Phase 2 sub-offering filter."
+        },
+        producesField: {
+          type: "string",
+          description: "Optional. Match only offerings whose deliverable schema declares this top-level field (identifier-shape only, ≤ 80 chars). Phase 2 sub-offering filter."
         }
       },
       required: ["query"]
@@ -1370,7 +1409,17 @@ const HANDLERS = {
       chain: Array.isArray(args.chain) ? args.chain : undefined,
       minReputation: typeof args.minReputation === "number" ? args.minReputation : undefined,
       freshness: typeof args.freshness === "number" ? args.freshness : undefined,
-      marketplace: normalizeMarketplace(args.marketplace)
+      marketplace: normalizeMarketplace(args.marketplace),
+      // v0.12.0 — Metabot v1.10 Phase 1+2 pass-through (all optional).
+      excludeRequirements: Array.isArray(args.excludeRequirements) ? args.excludeRequirements : undefined,
+      excludeAgents: Array.isArray(args.excludeAgents) ? args.excludeAgents : undefined,
+      excludeChains: Array.isArray(args.excludeChains) ? args.excludeChains : undefined,
+      maxPriceUsd: typeof args.maxPriceUsd === "number" ? args.maxPriceUsd : undefined,
+      includeResources: typeof args.includeResources === "boolean" ? args.includeResources : undefined,
+      expand: typeof args.expand === "boolean" ? args.expand : undefined,
+      includeRisk: typeof args.includeRisk === "boolean" ? args.includeRisk : undefined,
+      requiresField: typeof args.requiresField === "string" ? args.requiresField : undefined,
+      producesField: typeof args.producesField === "string" ? args.producesField : undefined
     });
     decorateMarketplaceUrls(result);
     addConfidence(result);

@@ -484,6 +484,32 @@ test("acp_risk_attestation validates address shape", async () => {
   }
 });
 
+// ===== v0.12.0 tests =====
+
+test("acp_find inputSchema includes v1.10 fields", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const find = r.result.tools.find(t => t.name === "acp_find");
+    assert.ok(find, "acp_find should be in tools/list");
+    const props = find.inputSchema.properties;
+    for (const k of [
+      "excludeRequirements", "excludeAgents", "excludeChains", "maxPriceUsd",
+      "includeResources", "expand", "includeRisk",
+      "requiresField", "producesField"
+    ]) {
+      assert.ok(k in props, `acp_find should accept '${k}'`);
+    }
+    // None of the new fields are required.
+    assert.deepEqual(find.inputSchema.required, ["query"],
+      "only 'query' should remain required after v1.10 extension");
+  } finally { conn.close(); }
+});
+
 // ===== v0.10.0 tests =====
 
 test("acp_oracle_sources / drift / capabilities expose proper schemas", async () => {
