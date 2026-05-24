@@ -120,6 +120,7 @@ const EXPECTED_TOOLS = [
   "acp_risk_sources",
   "acp_safe_quote",
   "acp_search_agents",
+  "acp_search_narrative",
   "acp_today",
   "acp_watch_status"
 ];
@@ -147,7 +148,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 37 tools with required schemas", async () => {
+test("tools/list returns all 38 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -508,6 +509,72 @@ test("acp_find inputSchema includes v1.10 fields", async () => {
     assert.deepEqual(find.inputSchema.required, ["query"],
       "only 'query' should remain required after v1.10 extension");
   } finally { conn.close(); }
+});
+
+test("acp_search_narrative requires query and rejects oversized previousQueries", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r1 = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_search_narrative", arguments: {} }
+    });
+    assert.equal(r1.result.isError, true);
+    assert.match(r1.result.content[0].text, /query is required/);
+
+    const r2 = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: {
+        name: "acp_search_narrative",
+        arguments: {
+          query: "find a swap agent",
+          previousQueries: ["a", "b", "c", "d", "e", "f"]  // 6 → too many
+        }
+      }
+    });
+    assert.equal(r2.result.isError, true);
+    assert.match(r2.result.content[0].text, /max 5 entries/);
+  } finally { conn.close(); }
+});
+
+test("acp_search_narrative posts to /v1/searchNarrative and wraps response with _warning", async () => {
+  const gw = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/searchNarrative" && req.method === "POST") {
+      res.end(JSON.stringify({
+        summary: "Top result is FastSwap — established Base DEX router, low slippage.",
+        perResultReason: [
+          { offeringName: "fastSwap", agentAddress: "0x" + "a".repeat(40),
+            reason: "highest hire count + 0.1% fee" }
+        ],
+        citedOfferings: ["fastSwap"],
+        cacheHit: false
+      }));
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_search_narrative", arguments: { query: "swap on base" } }
+    });
+    assert.equal(r.result.isError, undefined,
+      `expected success, got error: ${r.result.content?.[0]?.text}`);
+    const parsed = JSON.parse(r.result.content[0].text);
+    assert.match(parsed._warning, /third-party marketplace/i,
+      "narrative response must be untrusted-wrapped");
+    assert.match(parsed.summary, /FastSwap/);
+    assert.equal(parsed.cacheHit, false);
+    // Verify POST shape
+    assert.ok(gw.requestLog.some(r => r.method === "POST" && r.url === "/v1/searchNarrative"));
+  } finally { conn.close(); await gw.close(); }
 });
 
 // ===== v0.10.0 tests =====

@@ -1370,6 +1370,41 @@ const TOOLS = [
     description:
       "Portfolio-wide health snapshot. Probes a known-reachable free Resource on each of the 10 portfolio bots in parallel (TheMetaBot, ChainlinkBot, TheOracleBot, LiquidGuard, MEVProtect, EASIssuer, RevokeBot, ArenaBot, DeFiEval, AgentEval). Returns per-bot reachability, gateway latency, a sample response excerpt, and an aggregate `healthyCount`. Bot list is hardcoded in the MCP server — see PORTFOLIO_BOTS const. Use to answer 'is the whole portfolio up?' or to diagnose a single bot's outage during a buyer flow.",
     inputSchema: { type: "object", properties: {} }
+  },
+
+  // ===== v0.12.0 — TheMetaBot v1.10 Phase 3 paid offerings =====
+  // Two new tools wrapping the gateway's Claude-narrator + agent-risk-scorer
+  // endpoints. Both surface third-party marketplace text → wrapUntrusted.
+  {
+    name: "acp_search_narrative",
+    description:
+      "Claude-narrated summary of the top-5 ACP marketplace offerings matching a query. Returns a 3-5 sentence summary + 1-line 'why this ranked high' for each cited offering. Wraps TheMetaBot's $0.05 paid `searchNarrative` offering. Use when the buyer wants a human-readable explanation of WHY the ranking is what it is, not just a list of names. Sub-call count: 1 (single POST /v1/searchNarrative). Returned data includes third-party marketplace text — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The buyer query to narrate. Same shape as acp_find.query."
+        },
+        limit: {
+          type: "integer",
+          description: "Optional. Number of top results to narrate (1-50, default 5).",
+          minimum: 1,
+          maximum: 50
+        },
+        previousQueries: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional. The buyer's prior queries in this session (max 5 entries; each ≤ 200 chars). Helps the narrator de-emphasise repeated angles."
+        },
+        marketplace: {
+          type: "string",
+          enum: ["v1", "v2"],
+          description: "Optional. Restrict the underlying search to one ACP marketplace. Default = both."
+        }
+      },
+      required: ["query"]
+    }
   }
 ];
 
@@ -2350,6 +2385,33 @@ const HANDLERS = {
       marketplaceUrl: agentUrl(addr),
       checkedAt: new Date().toISOString(),
     });
+  },
+
+  // ===== v0.12.0 — Phase 3 paid-offering wrappers =====
+  // Both endpoints are X-API-Key gated on the gateway (Phase 3 hasn't shipped
+  // at the time of MCP v0.12.0 commit — calls 404 against the live gateway
+  // until Metabot v1.10 deploys). Surface third-party marketplace text →
+  // wrapUntrusted on the response.
+
+  acp_search_narrative: async (args) => {
+    if (!args?.query) throw new Error("query is required");
+    const previous = Array.isArray(args.previousQueries) ? args.previousQueries : [];
+    if (previous.length > 5) {
+      throw new Error("previousQueries: max 5 entries");
+    }
+    for (const q of previous) {
+      if (typeof q !== "string") throw new Error("previousQueries entries must be strings");
+      if (q.length > 200) throw new Error("previousQueries entries: each ≤ 200 chars");
+    }
+    const body = {
+      search: {
+        query: args.query,
+        limit: typeof args.limit === "number" ? args.limit : 5,
+        marketplace: normalizeMarketplace(args.marketplace)
+      },
+      previousQueries: previous
+    };
+    return wrapUntrusted(await callGateway("/v1/searchNarrative", body, "POST"));
   },
 
   // Parallel probe across the 10-bot portfolio. Per-bot failure isolation:
