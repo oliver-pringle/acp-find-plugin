@@ -971,3 +971,53 @@ test("acp_browse_agent rejects malformed agentAddress", async () => {
     assert.match(r.result.content[0].text, /address|hex/i);
   } finally { conn.close(); }
 });
+
+test("agentUrl returns no marketplaceUrl for non-hex addresses (indexer poisoning)", async () => {
+  // Indexer-poisoning simulation: the gateway returns an offering object
+  // with a non-hex agentAddress like "javascript:alert(1)". The MCP server's
+  // decorateMarketplaceUrls walks the response tree and would previously
+  // build a marketplaceUrl from any string. With the tightening, the URL is
+  // dropped (undefined) for non-hex inputs.
+  const gw = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url.startsWith("/v1/digest")) {
+      // acp_today calls /v1/digest under the hood
+      res.end(JSON.stringify({
+        results: [
+          // First record: legit hex address — should get marketplaceUrl
+          { agentAddress: "0x" + "a".repeat(40), agentName: "GoodBot" },
+          // Second record: poisoned address — should NOT get marketplaceUrl
+          { agentAddress: "javascript:alert(1)", agentName: "EvilBot" },
+        ]
+      }));
+      return;
+    }
+    res.end("{}");
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_today", arguments: {} } });
+    assert.equal(r.result.isError, undefined,
+      `expected success, got error: ${r.result.content?.[0]?.text}`);
+    const text = r.result.content[0].text;
+    // The legit record gets a marketplaceUrl ending in the hex address
+    assert.match(text, /app\.virtuals\.io\/acp\/agents\/0xaaaaaaaaa/,
+      "legitimate hex address should still get marketplaceUrl");
+    // The poisoned address must NOT appear inside a marketplaceUrl
+    // (the raw `agentAddress` field passthrough is the gateway's responsibility,
+    // not ours — what we own is that no URL embeds the bad value).
+    assert.ok(!/app\.virtuals\.io\/acp\/agents\/javascript:/.test(text),
+      `non-hex address must not appear in any URL field. Got: ${text.slice(0, 500)}`);
+    // Also assert no marketplaceUrl was synthesised for the bad record
+    // (decorateMarketplaceUrls only adds when agentUrl returns truthy)
+    const parsed = JSON.parse(text);
+    const records = parsed.results || [];
+    const evil = records.find((x) => x.agentName === "EvilBot");
+    assert.ok(evil, "expected EvilBot record in results");
+    assert.equal(evil.marketplaceUrl, undefined,
+      "poisoned-address record must not have marketplaceUrl");
+  } finally { conn.close(); await gw.close(); }
+});

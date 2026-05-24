@@ -181,8 +181,8 @@ function cachePut(key, v) {
 }
 
 function agentUrl(addr) {
-  if (!addr || typeof addr !== "string") return undefined;
-  return `${MARKETPLACE_URL_BASE}/${addr}`;
+  if (typeof addr !== "string" || !isHexAddress(addr)) return undefined;
+  return `${MARKETPLACE_URL_BASE}/${encodeURIComponent(addr.toLowerCase())}`;
 }
 
 // Walk a JSON tree and add `marketplaceUrl` to every object that has an
