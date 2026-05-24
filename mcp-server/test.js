@@ -933,3 +933,28 @@ test("validator rejects out-of-range numeric args", async () => {
     assert.match(r.result.content[0].text, /out of range/i);
   } finally { conn.close(); }
 });
+
+test("plaintext non-localhost ACP_API_URL suppresses API key + warns", async () => {
+  const { spawn } = await import("node:child_process");
+  const stderrChunks = [];
+  // Use a public-shaped HTTP URL (no real server needed — we don't fire tools)
+  const child = spawn(process.execPath, [SERVER], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ACP_API_URL: "http://example.invalid",
+      ACP_API_KEY: "test-key-123",
+    },
+  });
+  child.stderr.on("data", (c) => stderrChunks.push(c.toString()));
+  const conn = new Conn(child);
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    // Allow stderr to flush
+    await new Promise((r) => setTimeout(r, 100));
+    const stderr = stderrChunks.join("");
+    assert.match(stderr, /refusing to send X-API-Key/i,
+      `stderr should contain the suppression warning. Got: ${stderr}`);
+  } finally { conn.close(); }
+});

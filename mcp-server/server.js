@@ -26,6 +26,38 @@ const API_URL = (process.env.ACP_API_URL || "https://api.acp-metabot.dev").repla
 const API_KEY = process.env.ACP_API_KEY;
 const VERBOSE = !!process.env.ACP_VERBOSE || process.argv.includes("--verbose");
 const DISABLE_BOOT_BEACON = !!process.env.ACP_DISABLE_BOOT_BEACON;
+const ALLOW_PLAINTEXT_KEY = !!process.env.ACP_ALLOW_PLAINTEXT_KEY;
+const ALLOW_CUSTOM_GATEWAY = !!process.env.ACP_ALLOW_CUSTOM_GATEWAY;
+
+const EXPECTED_GATEWAY_HOSTS = new Set([
+  "api.acp-metabot.dev",
+]);
+
+// At-startup guard. Two checks:
+//   1. API_KEY + http: + non-localhost host → suppress X-API-Key unless
+//      ACP_ALLOW_PLAINTEXT_KEY=1.
+//   2. Host not in EXPECTED_GATEWAY_HOSTS + non-localhost → warn unless
+//      ACP_ALLOW_CUSTOM_GATEWAY=1.
+let SEND_API_KEY = !!API_KEY;
+{
+  let parsedUrl;
+  try { parsedUrl = new URL(API_URL); } catch {}
+  if (parsedUrl) {
+    const host = parsedUrl.hostname.toLowerCase();
+    const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    if (API_KEY && parsedUrl.protocol === "http:" && !isLocal) {
+      if (!ALLOW_PLAINTEXT_KEY) {
+        logErr(`[security] refusing to send X-API-Key to ${API_URL}: scheme is http: and host is not localhost. Set ACP_ALLOW_PLAINTEXT_KEY=1 to override.`);
+        SEND_API_KEY = false;
+      } else {
+        logErr(`[security] sending X-API-Key over plaintext to ${API_URL} because ACP_ALLOW_PLAINTEXT_KEY=1`);
+      }
+    }
+    if (!EXPECTED_GATEWAY_HOSTS.has(host) && !isLocal && !ALLOW_CUSTOM_GATEWAY) {
+      logErr(`[security] ACP_API_URL host "${host}" is not the expected api.acp-metabot.dev. If intentional (staging, fork), set ACP_ALLOW_CUSTOM_GATEWAY=1 to silence this warning.`);
+    }
+  }
+}
 const SERVER_NAME = "acp-find";
 const SERVER_VERSION = pkg.version;
 const PROTOCOL_VERSION = "2025-11-25";
@@ -463,7 +495,7 @@ async function fetchWithRetry(url, init) {
 
 async function callGateway(path, body, method = "POST") {
   const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-  if (API_KEY) headers["X-API-Key"] = API_KEY;
+  if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
 
   const init = { method, headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
   if (method !== "GET" && body !== undefined) {
@@ -506,7 +538,7 @@ function fireBootBeacon() {
   }
 
   const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-  if (API_KEY) headers["X-API-Key"] = API_KEY;
+  if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
 
   fetch(`${API_URL}/v1/plugin/boot`, {
     method: "POST",
@@ -1356,7 +1388,7 @@ const HANDLERS = {
     const addr = String(args.agentAddress).trim().toLowerCase();
     const url = `${API_URL}/v1/agentReputation?agent=${encodeURIComponent(addr)}`;
     const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
     const startedAt = Date.now();
     logVerbose(`→ GET /v1/agentReputation?agent=${addr}`);
     const res = await fetchWithRetry(url, {
@@ -1472,7 +1504,7 @@ const HANDLERS = {
       try {
         const url = `${API_URL}/v1/agentReputation?agent=${encodeURIComponent(addr)}`;
         const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-        if (API_KEY) headers["X-API-Key"] = API_KEY;
+        if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
         const res = await fetchWithRetry(url, {
           method: "GET",
           headers,
@@ -1723,7 +1755,7 @@ const HANDLERS = {
     const addr = String(args.agentAddress).trim().toLowerCase();
     const url = `${API_URL}/v1/agent/${encodeURIComponent(addr)}/feed-address`;
     const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
     const startedAt = Date.now();
     logVerbose(`→ GET /v1/agent/${addr}/feed-address`);
     const res = await fetchWithRetry(url, {
@@ -1844,7 +1876,7 @@ const HANDLERS = {
     const addr = String(args.agentAddress).trim().toLowerCase();
     const url = `${API_URL}/v1/agent/${encodeURIComponent(addr)}/arena`;
     const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
     const startedAt = Date.now();
     logVerbose(`→ GET /v1/agent/${addr}/arena`);
     const res = await fetchWithRetry(url, {
@@ -1871,7 +1903,7 @@ const HANDLERS = {
         : 50;
     const url = `${API_URL}/v1/arena/agents?limit=${limit}`;
     const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
     const startedAt = Date.now();
     logVerbose(`→ GET /v1/arena/agents?limit=${limit}`);
     const res = await fetchWithRetry(url, {
@@ -1902,7 +1934,7 @@ const HANDLERS = {
         : 4;
     const url = `${API_URL}/v1/arena/council-picks?weeks=${weeks}`;
     const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
     const startedAt = Date.now();
     logVerbose(`→ GET /v1/arena/council-picks?weeks=${weeks}`);
     const res = await fetchWithRetry(url, {
@@ -1927,7 +1959,7 @@ const HANDLERS = {
         : 50;
     const url = `${API_URL}/v1/marketplace-overlap?topN=${topN}`;
     const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
-    if (API_KEY) headers["X-API-Key"] = API_KEY;
+    if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
     const startedAt = Date.now();
     logVerbose(`→ GET /v1/marketplace-overlap?topN=${topN}`);
     const res = await fetchWithRetry(url, {
