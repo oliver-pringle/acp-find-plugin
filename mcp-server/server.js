@@ -1405,6 +1405,26 @@ const TOOLS = [
       },
       required: ["query"]
     }
+  },
+  {
+    name: "acp_agent_risk_check",
+    description:
+      "Defensive scam-risk assessment for a single ACP agent: reputation depth + pricing outliers + wallet provenance + V1↔V2 footprint anomaly. Returns a 0-100 score + tier (low/medium/high/critical) + per-signal detail. Wraps TheMetaBot's $0.05 paid `agentRiskCheck` offering. Distinct from `acp_risk_snapshot` (which evaluates ANY EVM wallet across LiquidGuard/RevokeBot/MEVProtect/reputation lanes) — `acp_agent_risk_check` is ACP-seller-specific and tuned for the 'is this an honest seller' question. Returned data includes third-party marketplace text — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "0x + 40 hex EVM wallet address of the agent to score."
+        },
+        chainId: {
+          type: "integer",
+          enum: [1, 8453],
+          description: "Optional. Chain to score on (1=Ethereum mainnet, 8453=Base; default 8453)."
+        }
+      },
+      required: ["agentAddress"]
+    }
   }
 ];
 
@@ -2412,6 +2432,17 @@ const HANDLERS = {
       previousQueries: previous
     };
     return wrapUntrusted(await callGateway("/v1/searchNarrative", body, "POST"));
+  },
+
+  acp_agent_risk_check: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    // v0.11.0 normalizeAddress handles 0x+40-hex shape validation.
+    const addr = normalizeAddress(args.agentAddress);
+    const body = {
+      agentAddress: addr,
+      chainId: typeof args.chainId === "number" ? args.chainId : 8453
+    };
+    return wrapUntrusted(await callGateway("/v1/agentRiskCheck", body, "POST"));
   },
 
   // Parallel probe across the 10-bot portfolio. Per-bot failure isolation:

@@ -90,6 +90,7 @@ const EXPECTED_TOOLS = [
   "acp_agent_reputation",
   "acp_agent_reputation_history",
   "acp_agent_resources",
+  "acp_agent_risk_check",
   "acp_agent_verify",
   "acp_arena_check",
   "acp_arena_council_picks",
@@ -148,7 +149,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 38 tools with required schemas", async () => {
+test("tools/list returns all 39 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -574,6 +575,71 @@ test("acp_search_narrative posts to /v1/searchNarrative and wraps response with 
     assert.equal(parsed.cacheHit, false);
     // Verify POST shape
     assert.ok(gw.requestLog.some(r => r.method === "POST" && r.url === "/v1/searchNarrative"));
+  } finally { conn.close(); await gw.close(); }
+});
+
+test("acp_agent_risk_check validates agentAddress shape", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const noAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_agent_risk_check", arguments: {} }
+    });
+    assert.equal(noAddr.result.isError, true);
+    assert.match(noAddr.result.content[0].text, /agentAddress is required|0x followed by 40 hex chars/);
+
+    const badAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "acp_agent_risk_check", arguments: { agentAddress: "not-an-address" } }
+    });
+    assert.equal(badAddr.result.isError, true);
+    assert.match(badAddr.result.content[0].text, /0x followed by 40 hex chars/);
+  } finally { conn.close(); }
+});
+
+test("acp_agent_risk_check posts to /v1/agentRiskCheck and wraps response with _warning", async () => {
+  const gw = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/agentRiskCheck" && req.method === "POST") {
+      res.end(JSON.stringify({
+        agentAddress: "0x" + "a".repeat(40),
+        riskScore: 22,
+        riskTier: "low",
+        signals: [
+          { name: "reputation_depth", weight: 0.3, score: 88,
+            detail: "30-day completion rate 0.97 over 142 jobs — strong evidence." },
+          { name: "pricing_outlier", weight: 0.2, score: 60,
+            detail: "Pricing within 1 stdev of category median." }
+        ],
+        evaluatedAt: "2026-05-24T10:00:00Z",
+        cacheTtl: 300
+      }));
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_agent_risk_check",
+        arguments: { agentAddress: "0x" + "a".repeat(40) } }
+    });
+    assert.equal(r.result.isError, undefined,
+      `expected success, got error: ${r.result.content?.[0]?.text}`);
+    const parsed = JSON.parse(r.result.content[0].text);
+    assert.match(parsed._warning, /third-party marketplace/i,
+      "risk check response must be untrusted-wrapped");
+    assert.equal(parsed.riskScore, 22);
+    assert.equal(parsed.riskTier, "low");
+    // Verify POST shape
+    assert.ok(gw.requestLog.some(r => r.method === "POST" && r.url === "/v1/agentRiskCheck"));
   } finally { conn.close(); await gw.close(); }
 });
 
