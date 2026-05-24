@@ -791,3 +791,34 @@ test("acp_resource_call enforces ACP_RESOURCE_BODY_LIMIT", async () => {
     assert.match(r.result.content[0].text, /exceeded.*bytes/i);
   } finally { conn.close(); await gw.close(); await big.close(); }
 });
+
+test("ACP_MAX_CONCURRENT serialises tools/call invocations", async () => {
+  // Stub gateway sleeps 200 ms per request; with cap=1, three concurrent
+  // tools/call invocations should serialise (~600 ms total) rather than run
+  // in parallel (~200 ms).
+  const gw = await startStubGateway((req, res) => {
+    setTimeout(() => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, ts: Date.now() }));
+    }, 200);
+  });
+  const conn = startServer({ ACP_API_URL: gw.url, ACP_MAX_CONCURRENT: "1" });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const start = Date.now();
+    const results = await Promise.all([
+      conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+        params: { name: "acp_today", arguments: {} } }),
+      conn.rpc({ jsonrpc: "2.0", id: 3, method: "tools/call",
+        params: { name: "acp_today", arguments: {} } }),
+      conn.rpc({ jsonrpc: "2.0", id: 4, method: "tools/call",
+        params: { name: "acp_today", arguments: {} } }),
+    ]);
+    const elapsed = Date.now() - start;
+    // With cap=1 + 200 ms upstream, serialised execution ≈ 600 ms.
+    // Generous lower bound (450 ms) to absorb scheduling jitter.
+    assert.ok(elapsed >= 450, `expected serialised execution (~600 ms), got ${elapsed} ms`);
+    for (const r of results) assert.equal(r.result.isError, undefined);
+  } finally { conn.close(); await gw.close(); }
+});

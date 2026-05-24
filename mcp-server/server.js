@@ -239,6 +239,31 @@ function makeBufferedResponse(orig, buf) {
   };
 }
 
+// --- concurrency semaphore ---------------------------------------------------
+// Caps in-flight tool invocations so a runaway client (or a buggy LLM loop)
+// can't OOM the host or burn gateway rate limits. initialize + tools/list
+// bypass — they're cheap and synchronous. Cancellation handling
+// (notifications/cancelled) deferred to v0.11.0.
+
+const MAX_CONCURRENT = Math.max(1, Math.min(64,
+  Number(process.env.ACP_MAX_CONCURRENT) || 8));
+let inflightCount = 0;
+const waitQueue = [];
+
+async function withSlot(fn) {
+  if (inflightCount >= MAX_CONCURRENT) {
+    await new Promise((resolve) => waitQueue.push(resolve));
+  }
+  inflightCount++;
+  try {
+    return await fn();
+  } finally {
+    inflightCount--;
+    const next = waitQueue.shift();
+    if (next) next();
+  }
+}
+
 // --- transport -------------------------------------------------------------
 
 // One retry on transient 5xx or network errors; never retries on 4xx (client
@@ -2143,7 +2168,9 @@ async function handleRequest(req) {
 
     case "tools/call": {
       try {
-        const result = await dispatchTool(params?.name, params?.arguments);
+        const handler = HANDLERS[params?.name];
+        if (!handler) throw new Error(`Unknown tool: ${params?.name}`);
+        const result = await withSlot(() => handler(params?.arguments ?? {}));
         return send({
           jsonrpc: "2.0",
           id,
