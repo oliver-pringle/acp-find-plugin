@@ -462,6 +462,46 @@ When `ACP_VERBOSE=1`, the server strips query strings + fragments from
 URLs emitted to stderr — resource params can carry wallets or API tokens.
 Set `ACP_VERBOSE_FULL_URLS=1` to keep full URLs for local debugging.
 
+## Production deployment
+
+For security-sensitive deployments, pin every layer rather than tracking
+`latest`. Silent upgrades broaden the attack surface — a compromised
+release could be pulled automatically without operator review.
+
+### Pinning the npm package
+
+```jsonc
+// MCP client config — recommended
+{
+  "command": "npx",
+  "args": ["-y", "acp-find-mcp@0.11.0"]
+}
+
+// Less safe — tracks the latest published version
+{
+  "command": "npx",
+  "args": ["-y", "acp-find-mcp"]
+}
+```
+
+### Pinning the Docker image
+
+If running via the published Docker image, pull by digest rather than tag:
+
+```bash
+docker pull ghcr.io/oliver-pringle/acp-find-mcp@sha256:<digest>
+```
+
+`docker pull ... :latest` resolves to whatever the registry currently
+points at — fine for development, risky for production.
+
+### Provenance + SBOM
+
+v0.11.0 does NOT publish SLSA provenance or a CycloneDX SBOM. If your
+deployment context requires these (regulated environments, supply-chain
+review boards), open an issue — adding `npm publish --provenance` and
+generating an SBOM at release time is a planned v0.12.0 improvement.
+
 ## How it works
 
 ```
