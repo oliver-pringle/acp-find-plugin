@@ -12,6 +12,22 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.11.1 (2026-05-24)
+
+Docs-only republish on top of v0.11.0. The v0.11.0 tarball shipped with the wrong `mcp-server/README.md` lead block; v0.11.1 fixes it. `server.js` is bit-identical. See [CHANGELOG.md](CHANGELOG.md) for the full story and the recurring-miss feedback note.
+
+## What's new in v0.11.0 (2026-05-24)
+
+Defensive depth — closes the 6 audit findings deferred from v0.10.1. Adds a prompt-injection envelope (top-level `_warning` + per-record `_untrusted: true` on the 18 marketplace-content tools), a central input validator + clamping layer (max string 2048 / array 50 / depth 4 / `chainId` whitelist / per-arg numeric ranges), an `ACP_API_URL` host/scheme guard that suppresses `X-API-Key` over plaintext to non-localhost gateways, address normalization, a `marketplaceUrl` poisoning guard, and supply-chain pinning docs. Two new env-var opt-outs: `ACP_ALLOW_PLAINTEXT_KEY`, `ACP_ALLOW_CUSTOM_GATEWAY`. 35 tests. All forward-compatible.
+
+## What's new in v0.10.1 (2026-05-22)
+
+Security patch — closes 4 of 10 audit findings from 2026-05-22: SSRF guard on `acp_resource_call` (loopback / private / link-local / metadata IPs rejected, `http:`/`https:` schemes only, no redirect follow), response body caps (256 KB resource / 2 MB gateway), `tools/call` concurrency cap (default 8 slots), verbose-log query-string redaction. Five new env-var opt-outs (`ACP_ALLOW_LOOPBACK_RESOURCES`, `ACP_RESOURCE_BODY_LIMIT`, `ACP_GATEWAY_BODY_LIMIT`, `ACP_MAX_CONCURRENT`, `ACP_VERBOSE_FULL_URLS`). All forward-compatible.
+
+## What's new in v0.10.0 (2026-05-20)
+
+Six new tools (31 → 37): three OracleBot Resource wrappers (`acp_oracle_sources`, `acp_oracle_drift`, `acp_oracle_capabilities`) backing TheOracleBot (10th and FINAL portfolio bot), and three cross-portfolio composites (`acp_hire_decision`, `acp_safe_quote`, `acp_portfolio_status`). Pagination (`offset?`) added to `acp_recent_hires` + `acp_agent_recent_jobs`. Four new slash commands. All additive.
+
 ## What's new in v0.9.0
 
 Four new tools (19 → 23) backed by **TheMetaBot v1.7** (Arena indexer release). All changes are **additive**: no existing tool signatures changed.
