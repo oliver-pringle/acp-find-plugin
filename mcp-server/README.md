@@ -11,6 +11,19 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.11.0
+
+Defensive depth — closes the 6 audit findings deferred from v0.10.1. **Additive**, forward-compatible. No new tools, no signature changes; existing callers see the same response shape plus two new top-level fields on marketplace-content tools (`_warning` + per-record `_untrusted: true`) and clearer `isError` messages on malformed input.
+
+- **Prompt-injection envelope** (audit #2). Tools that surface marketplace text (`acp_find`, `acp_search_agents`, `acp_browse_agent`, `acp_offering`, `acp_compose_stack`, `acp_today`, `acp_recent_hires`, `acp_agent_recent_jobs`, `acp_compare_agents`, `acp_resources_search`, `acp_agent_resources`, `acp_resource_call`, `acp_hire_decision`, `acp_safe_quote` + the 4 `acp_arena_*` tools = 18 total) wrap their responses with a top-level `_warning` and tag every third-party-authored object with `_untrusted: true`. Tool descriptions in `tools/list` are updated to flag the trust boundary so LLMs see it before calling.
+- **Central input validator + clamping** (audit #3). `validateToolArgs(name, args)` runs before every `tools/call` handler (and before the v0.10.1 concurrency semaphore). Caps strings at 2048 chars, arrays at 50, object depth 4 / 30 keys; enforces `0x`+40-hex EVM shape, `chainId` whitelist (`1, 8453`), and per-arg numeric ranges (`limit` 1-50, `days` 1-365, `offset` 0-10000, `weeks` 1-52, `topN` 1-100, `maxOfferings` 1-30, `priceMaxUsdc` 0-100000, `budgetUsdc` 0-100000).
+- **`ACP_API_URL` host/scheme guard** (audit #5). Suppresses `X-API-Key` (with a loud stderr warning) if `ACP_API_URL` is `http:` and the host is not localhost. Override via `ACP_ALLOW_PLAINTEXT_KEY=1`. Also warns when host is not the canonical `api.acp-metabot.dev`; silence with `ACP_ALLOW_CUSTOM_GATEWAY=1`.
+- **Address normalization** (audit #8). `normalizeAddress(addr)` swept into `acp_agent_reputation`, `acp_agent_reputation_history`, `acp_browse_agent`, `acp_agent_resources`, `acp_resource_call`.
+- **`marketplaceUrl` poisoning guard** (audit #9). `agentUrl(addr)` now requires `0x`+40 hex and `encodeURIComponent`s the value — a poisoned indexer response with a non-hex `agentAddress` no longer surfaces as a malformed URL.
+- **Supply-chain pinning docs** (audit #10). New "Production deployment" section recommends pinning `acp-find-mcp@0.11.0` and Docker digest pinning. SLSA provenance + SBOM flagged for v0.12.0.
+
+35 tests (was 29 after v0.10.1; +6 new in v0.11.0). All v0.10.1 env vars carry forward unchanged.
+
 ## What's new in v0.10.1
 
 Security patch. No new tools, no API changes; backward-compatible env-var opt-outs only. Closes 4 of 10 findings from the 2026-05-22 audit:
