@@ -11,6 +11,10 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.11.1
+
+Docs-only republish. `server.js` is bit-identical to v0.11.0; the only change is that this tarball's `README.md` correctly opens with the v0.11.0 "What's new" block. The v0.11.0 tarball shipped with the v0.10.1 lead block at the top, so v0.11.0 changes were only visible inside the security subsections. If you're on v0.11.0 there is no functional reason to upgrade.
+
 ## What's new in v0.11.0
 
 Defensive depth — closes the 6 audit findings deferred from v0.10.1. **Additive**, forward-compatible. No new tools, no signature changes; existing callers see the same response shape plus two new top-level fields on marketplace-content tools (`_warning` + per-record `_untrusted: true`) and clearer `isError` messages on malformed input.

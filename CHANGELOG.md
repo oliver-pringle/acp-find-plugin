@@ -2,6 +2,14 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.11.1 — 2026-05-24 — README lead-block fix (docs-only)
+
+Docs-only patch. No code changes; identical `server.js` to v0.11.0 (sha unchanged).
+
+The published `acp-find-mcp@0.11.0` tarball shipped with the `mcp-server/README.md` lead block still announcing "What's new in v0.10.1" — the v0.11.0 changes were documented only in the Security & operational limits subsections, not at the top of the README. npm tarballs are immutable, so v0.11.1 reships the package with the corrected README lead block ("What's new in v0.11.0") above the v0.10.1 entry. Same fix pattern recorded in `feedback_acp_find_readme_whats_new_lead` to prevent the recurrence on future releases.
+
+If you already pulled v0.11.0, no functional upgrade is needed — but `npx -y acp-find-mcp@0.11.1` will give you the version of the README that correctly reflects what shipped.
+
 ## v0.11.0 — 2026-05-24 — Defensive depth
 
 Closes the 6 audit findings deferred from v0.10.1. Additive — every change is opt-out-able; existing callers see the same response shape with two new fields (`_warning`, `_untrusted`) added on marketplace-content tools, and any clearly-malformed input now returns a typed `isError` instead of silently reaching the gateway.
