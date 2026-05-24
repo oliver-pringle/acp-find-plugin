@@ -11,6 +11,17 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.10.1
+
+Security patch. No new tools, no API changes; backward-compatible env-var opt-outs only. Closes 4 of 10 findings from the 2026-05-22 audit:
+
+- **SSRF guard on `acp_resource_call`** — Resource URLs must be `http(s):` and resolve to a public IP. Loopback / private / link-local / multicast / cloud-metadata addresses are rejected; HTTP 3xx redirects are refused rather than followed. Opt-out for local-dev: `ACP_ALLOW_LOOPBACK_RESOURCES=1`.
+- **Response body caps** — Resource calls capped at 256 KB (third-party untrusted); gateway calls capped at 2 MB (trusted Metabot). Override via `ACP_RESOURCE_BODY_LIMIT` / `ACP_GATEWAY_BODY_LIMIT`.
+- **Concurrency cap on `tools/call`** — FIFO semaphore, default 8 slots, override via `ACP_MAX_CONCURRENT` (clamped 1..64). `initialize` and `tools/list` bypass.
+- **Verbose-log query-string redaction** — `ACP_VERBOSE=1` no longer prints URL query strings (Resource params can carry wallets/API tokens). Set `ACP_VERBOSE_FULL_URLS=1` to keep full URLs for local debugging.
+
+The remaining 6 findings (prompt-injection envelope, central input validator, `ACP_API_URL` scheme/host guard, address normalization, `marketplaceUrl` validation, supply-chain docs) are queued for **v0.11.0**. See [CHANGELOG.md](../CHANGELOG.md#v0101--2026-05-22--security-patch) and the [security section](#security--operational-limits) for the full env-var reference.
+
 ## What's new in v0.10.0
 
 Six new tools (31 → 37), four new slash commands (24 → 28), pagination on the two recent-activity surfaces. All additive — no existing tool signatures changed. Backs **TheOracleBot** (10th and FINAL portfolio bot) + extends v0.9.1's safety primitives with **cross-portfolio composition**.
