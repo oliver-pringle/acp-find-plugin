@@ -59,6 +59,21 @@ function logVerbose(...args) {
   process.stderr.write(`[acp-find:verbose] ${s}\n`);
 }
 
+const VERBOSE_FULL_URLS = !!process.env.ACP_VERBOSE_FULL_URLS;
+
+// Strip query string + fragment when echoing URLs to stderr. Resource calls
+// can carry wallets, API tokens, or webhooks in query params — keeping them
+// out of IDE/client logs by default. Set ACP_VERBOSE_FULL_URLS=1 to keep.
+function redactUrl(urlStr) {
+  if (VERBOSE_FULL_URLS) return urlStr;
+  try {
+    const u = new URL(urlStr);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return "[unparseable-url]";
+  }
+}
+
 // Categories almost never change; health is cheap but high-frequency in
 // conversational sessions. A 5-min in-memory cache cuts gateway load without
 // noticeable staleness.
@@ -273,13 +288,13 @@ async function fetchWithRetry(url, init) {
   try {
     const res = await fetch(url, init);
     if (res.status >= 500 && res.status < 600) {
-      logVerbose(`${res.status} on ${url}; retrying once after ${RETRY_BACKOFF_MS}ms`);
+      logVerbose(`${res.status} on ${redactUrl(url)}; retrying once after ${RETRY_BACKOFF_MS}ms`);
       await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
       return fetch(url, init);
     }
     return res;
   } catch (err) {
-    logVerbose(`network error on ${url}: ${err.message}; retrying once after ${RETRY_BACKOFF_MS}ms`);
+    logVerbose(`network error on ${redactUrl(url)}: ${err.message}; retrying once after ${RETRY_BACKOFF_MS}ms`);
     await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
     return fetch(url, init);
   }
@@ -1494,7 +1509,7 @@ const HANDLERS = {
     await validateResourceUrl(callUrl.toString());
 
     // Leg 2 — direct call. Reuse the same timeout the gateway uses.
-    logVerbose(`→ resource call ${name} on ${addr}: ${callUrl.toString()}`);
+    logVerbose(`→ resource call ${name} on ${addr}: ${redactUrl(callUrl.toString())}`);
     let resp;
     try {
       resp = await fetch(callUrl.toString(), {

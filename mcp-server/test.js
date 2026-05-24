@@ -822,3 +822,54 @@ test("ACP_MAX_CONCURRENT serialises tools/call invocations", async () => {
     for (const r of results) assert.equal(r.result.isError, undefined);
   } finally { conn.close(); await gw.close(); }
 });
+
+test("ACP_VERBOSE redacts query strings by default", async () => {
+  // Default verbose mode must not echo Resource-call query params to stderr —
+  // those can carry wallets, API tokens, or webhooks. Spawn the server
+  // manually (the helper discards stderr) so we can capture the verbose log.
+  const stderrChunks = [];
+  let gwUrl;
+  const gw = await startStubGateway((req, res) => {
+    if (req.url.startsWith("/v1/agent/")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        resources: [{ name: "search", url: `${gwUrl}/search` }]
+      }));
+      return;
+    }
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ ok: true }));
+  });
+  gwUrl = gw.url;
+  const child = spawn(process.execPath, [SERVER], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ACP_API_URL: gw.url,
+      ACP_VERBOSE: "1",
+      ACP_ALLOW_LOOPBACK_RESOURCES: "1",
+    },
+  });
+  child.stderr.on("data", (c) => stderrChunks.push(c.toString()));
+  const conn = new Conn(child);
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_resource_call",
+        arguments: {
+          agentAddress: "0x" + "a".repeat(40),
+          resourceName: "search",
+          params: { apiKey: "supersecret123", query: "marketplace" }
+        } } });
+    assert.equal(r.result.isError, undefined,
+      `expected success, got error: ${r.result.content?.[0]?.text}`);
+    // Drain stderr buffer
+    await new Promise(r => setTimeout(r, 50));
+    const stderr = stderrChunks.join("");
+    assert.ok(!stderr.includes("supersecret123"),
+      `stderr should not contain apiKey value. Stderr: ${stderr}`);
+    assert.ok(!stderr.includes("apiKey="),
+      `stderr should not contain query string keys. Stderr: ${stderr}`);
+  } finally { conn.close(); await gw.close(); }
+});
