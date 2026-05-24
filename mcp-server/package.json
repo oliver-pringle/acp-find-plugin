@@ -1,7 +1,7 @@
 {
   "name": "acp-find-mcp",
-  "version": "0.11.1",
-  "description": "MCP server for searching the Virtuals Protocol ACP marketplace + Degen Arena + portfolio risk scoring + cross-portfolio composition. Exposes 37 tools — including the v0.10.0 composites (acp_hire_decision, acp_safe_quote, acp_portfolio_status) and OracleBot Resource wrappers (acp_oracle_sources, acp_oracle_drift, acp_oracle_capabilities) on top of the v0.9.1 risk bundle (acp_agent_verify and friends), Degen Arena tools, and the v0.7+ Resources / cost / feed-address suite — backed by the public api.acp-metabot.dev gateway. Works in Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop.",
+  "version": "0.12.0",
+  "description": "MCP server for searching the Virtuals Protocol ACP marketplace + Degen Arena + portfolio risk scoring + cross-portfolio composition. Exposes 39 tools — including v0.12.0 surfacing of Metabot v1.10 Phase 3 paid offerings (acp_search_narrative, acp_agent_risk_check) plus 9 new optional v1.10 fields on acp_find (Phase 1+2 negative filters + sub-offering filters), v0.10.0 composites (acp_hire_decision, acp_safe_quote, acp_portfolio_status), OracleBot Resource wrappers (acp_oracle_sources, acp_oracle_drift, acp_oracle_capabilities), v0.9.1 risk bundle (acp_agent_verify and friends), Degen Arena tools, and the v0.7+ Resources / cost / feed-address suite — backed by the public api.acp-metabot.dev gateway. Works in Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop.",
   "type": "module",
   "main": "server.js",
   "bin": {

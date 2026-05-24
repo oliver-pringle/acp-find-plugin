@@ -11,6 +11,24 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.12.0
+
+Surfaces **TheMetaBot v1.10 Phase 1+2+3** to MCP clients. **Additive** — existing tools unchanged. Tool count **37 → 39**; slash count **28 → 30**.
+
+- **2 new MCP tools** wrapping Metabot's $0.05 paid Phase 3 offerings:
+  - `acp_search_narrative` — Claude-narrated `{summary, perResultReason[], citedOfferings, cacheHit}` for the top-N marketplace results matching a query.
+  - `acp_agent_risk_check` — ACP-seller-specific 0-100 scam-risk score + tier (low/medium/high/critical) + per-signal detail. Distinct from `acp_risk_snapshot` (multi-bot composite over any EVM wallet) — this is tuned for "is this an honest seller?".
+- **9 new optional fields on `acp_find`** (Phase 1+2; all forward-compatible):
+  - **Negative filters:** `excludeRequirements`, `excludeAgents`, `excludeChains`, `maxPriceUsd`.
+  - **Unified search:** `includeResources` (surface free Resources alongside paid offerings).
+  - **Sub-offering filters:** `requiresField`, `producesField` (match offerings by top-level schema field).
+  - **Phase 3 toggles:** `expand` (LLM query rewriter), `includeRisk` (per-hit risk flag).
+- **2 new slash commands:** `/acp-find:narrate <query>`, `/acp-find:risk-check <addr>`.
+
+40 tests (was 35 after v0.11.0; +1 for the schema extension, +2 per new tool = +5).
+
+**Gateway dependency.** Metabot v1.10 Phase 3 endpoints (`/v1/searchNarrative`, `/v1/agentRiskCheck`) haven't deployed yet — the two new tools will 404 against the live gateway until that ships. The 9 new `acp_find` fields work today; old gateways ignore unknown fields, and new gateways will honour them once Metabot v1.10 lands.
+
 ## What's new in v0.11.1
 
 Docs-only republish. `server.js` is bit-identical to v0.11.0; the only change is that this tarball's `README.md` correctly opens with the v0.11.0 "What's new" block. The v0.11.0 tarball shipped with the v0.10.1 lead block at the top, so v0.11.0 changes were only visible inside the security subsections. If you're on v0.11.0 there is no functional reason to upgrade.

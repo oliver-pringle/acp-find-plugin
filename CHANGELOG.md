@@ -2,6 +2,35 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.12.0 — 2026-05-24 — Surface Metabot v1.10 (Phase 1+2+3)
+
+Surfaces TheMetaBot v1.10 to MCP clients. Additive — every existing tool keeps identical signatures and response shapes. The 9 new optional fields on `acp_find` are forward-compatible: old plugin clients keep working against the new gateway, and old gateways silently ignore the new fields. Tool count **37 → 39**; slash command count **28 → 30**.
+
+**New MCP tools (2)** — both wrap Metabot v1.10 Phase 3 paid offerings:
+
+- `acp_search_narrative` ⭐ — wraps `POST /v1/searchNarrative` ($0.05). Returns a 3-5 sentence Claude-narrated summary of the top-N marketplace results plus a 1-line "why this ranked high" per cited offering. Args: `query` (required), `limit?` (1-50, default 5), `previousQueries?` (max 5 × 200 chars), `marketplace?`. Response wrapped in the v0.11.0 untrusted-content envelope.
+- `acp_agent_risk_check` ⭐ — wraps `POST /v1/agentRiskCheck` ($0.05). Defensive scam-risk assessment for one ACP agent: reputation depth + pricing outliers + wallet provenance + V1↔V2 footprint anomaly. Returns 0-100 score + tier (low/medium/high/critical) + per-signal detail. Args: `agentAddress` (required, 0x+40-hex), `chainId?` (1|8453, default 8453). Distinct from `acp_risk_snapshot` (which scores ANY EVM wallet across 4 sub-bots) — this is ACP-seller-specific.
+
+**`acp_find` extension** — 9 new optional fields, all additive:
+
+- **Phase 1 negative filters:** `excludeRequirements: string[]`, `excludeAgents: string[]` (each 0x+40-hex), `excludeChains: string[]`, `maxPriceUsd: number` (0..100000).
+- **Phase 1 unified search:** `includeResources: boolean` (default true). Surfaces free Resources alongside paid offerings.
+- **Phase 2 sub-offering filters:** `requiresField: string` (top-level requirement-schema field, identifier-shape ≤ 80 chars), `producesField: string` (top-level deliverable-schema field).
+- **Phase 3 toggles:** `expand: boolean` (run LLM query rewriter — off when daily $0.50 cap breached), `includeRisk: boolean` (per-hit `riskFlag` low/medium/high/critical via AgentRiskScorer).
+
+Handler passes each through to `POST /v1/search` verbatim — the gateway is what enforces semantics. Old gateways ignore unknown fields; new gateways do the work.
+
+**New slash commands (2):**
+
+- `/acp-find:narrate <query> [limit:N] [marketplace:v1|v2]` — narrate top-N results.
+- `/acp-find:risk-check <addr> [chainId:N]` — single-agent risk verdict with tier callout.
+
+**Tests:** 40 (was 35 after v0.11.0; +1 for the schema extension + 2 per new tool = +5).
+
+**Gateway dependency** — Phase 3 of Metabot v1.10 (the new `/v1/searchNarrative` and `/v1/agentRiskCheck` endpoints) isn't deployed at the time of this MCP release. The two new tools will 404 against the current `api.acp-metabot.dev` until Metabot v1.10 ships to the droplet. The 9 new `acp_find` fields work today on the existing gateway — they just don't change behaviour until Metabot v1.10's search rewriter respects them.
+
+**Compatibility:** All v0.12.0 changes are **additive**. Existing 37 tools, 28 slash commands, and every env var carry forward unchanged. MCP protocol version: `2025-11-25` (unchanged).
+
 ## v0.11.1 — 2026-05-24 — README lead-block fix (docs-only)
 
 Docs-only patch. No code changes; identical `server.js` to v0.11.0 (sha unchanged).
