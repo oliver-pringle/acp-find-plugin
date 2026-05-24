@@ -276,7 +276,9 @@ test("acp_resource_call requires agentAddress and resourceName", async () => {
       params: { name: "acp_resource_call", arguments: { agentAddress: "0xabc" } }
     });
     assert.equal(r2.result.isError, true);
-    assert.match(r2.result.content[0].text, /resourceName is required/);
+    // Either the handler complains about the missing resourceName, or the
+    // central validator rejects "0xabc" as a malformed agentAddress first.
+    assert.match(r2.result.content[0].text, /resourceName is required|0x followed by 40 hex chars/);
   } finally {
     conn.close();
   }
@@ -904,4 +906,30 @@ test("marketplace-content tools wrap responses with _warning + _untrusted", asyn
     assert.equal(first.agentAddress, "0x" + "a".repeat(40),
       "trusted fields preserved");
   } finally { conn.close(); await gw.close(); }
+});
+
+test("validator rejects over-long string args", async () => {
+  const conn = startServer({});
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_find",
+        arguments: { query: "x".repeat(3000) } } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /too long/i);
+  } finally { conn.close(); }
+});
+
+test("validator rejects out-of-range numeric args", async () => {
+  const conn = startServer({});
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_find",
+        arguments: { query: "ok", limit: 9999 } } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /out of range/i);
+  } finally { conn.close(); }
 });

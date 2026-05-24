@@ -336,6 +336,110 @@ async function withSlot(fn) {
   }
 }
 
+// --- input validator --------------------------------------------------------
+// Central args validator + clamping layer. Runs before every tools/call
+// handler invocation so handlers + the gateway never see pathological input.
+// Violations throw with an actionable message that the existing try/catch
+// surfaces as isError. Validation runs BEFORE withSlot — a malformed call
+// shouldn't consume a concurrency slot.
+
+const VALIDATOR_DEFAULTS = {
+  maxStringLen: 2048,
+  maxArrayLen: 50,
+  maxObjectDepth: 4,
+  maxObjectKeys: 30,
+};
+
+const NUMERIC_RANGES = {
+  limit:        [1, 50],
+  offset:       [0, 10_000],
+  days:         [1, 365],
+  weeks:        [1, 52],
+  topN:         [1, 100],
+  maxOfferings: [1, 30],
+  priceMaxUsdc: [0, 100_000],
+  budgetUsdc:   [0, 100_000],
+};
+
+const CHAIN_ID_WHITELIST = new Set([1, 8453]);
+
+const ADDRESS_ARGS = new Set(["agentAddress", "address", "wallet"]);
+const ADDRESS_ARRAY_ARGS = new Set(["agentAddresses"]);
+
+function validateToolArgs(toolName, args) {
+  if (args == null) return {};
+  if (typeof args !== "object" || Array.isArray(args)) {
+    throw new Error(`tool ${toolName}: arguments must be an object`);
+  }
+  const keys = Object.keys(args);
+  if (keys.length > VALIDATOR_DEFAULTS.maxObjectKeys) {
+    throw new Error(`tool ${toolName}: arguments object has too many keys (${keys.length} > ${VALIDATOR_DEFAULTS.maxObjectKeys})`);
+  }
+  const out = {};
+  for (const k of keys) {
+    out[k] = validateArgValue(toolName, k, args[k], 1);
+  }
+  return out;
+}
+
+function validateArgValue(toolName, key, v, depth) {
+  if (v == null) return v;
+  if (typeof v === "string") {
+    if (v.length > VALIDATOR_DEFAULTS.maxStringLen) {
+      throw new Error(`tool ${toolName}: arg "${key}" is too long (${v.length} > ${VALIDATOR_DEFAULTS.maxStringLen} chars)`);
+    }
+    if (ADDRESS_ARGS.has(key)) {
+      if (!isHexAddress(v)) {
+        throw new Error(`tool ${toolName}: arg "${key}" must be 0x followed by 40 hex chars`);
+      }
+    }
+    return v;
+  }
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) {
+      throw new Error(`tool ${toolName}: arg "${key}" must be a finite number`);
+    }
+    if (key === "chainId" && !CHAIN_ID_WHITELIST.has(v)) {
+      throw new Error(`tool ${toolName}: arg "chainId" must be one of ${[...CHAIN_ID_WHITELIST].join(", ")}`);
+    }
+    const range = NUMERIC_RANGES[key];
+    if (range) {
+      const [lo, hi] = range;
+      if (v < lo || v > hi) {
+        throw new Error(`tool ${toolName}: arg "${key}"=${v} out of range [${lo}, ${hi}]`);
+      }
+    }
+    return v;
+  }
+  if (typeof v === "boolean") return v;
+  if (Array.isArray(v)) {
+    if (v.length > VALIDATOR_DEFAULTS.maxArrayLen) {
+      throw new Error(`tool ${toolName}: arg "${key}" array too long (${v.length} > ${VALIDATOR_DEFAULTS.maxArrayLen})`);
+    }
+    if (ADDRESS_ARRAY_ARGS.has(key)) {
+      for (const a of v) {
+        if (typeof a !== "string" || !isHexAddress(a)) {
+          throw new Error(`tool ${toolName}: invalid wallet address in "${key}" (must be 0x followed by 40 hex chars): ${String(a).slice(0, 80)}`);
+        }
+      }
+    }
+    return v.map((x) => validateArgValue(toolName, key, x, depth + 1));
+  }
+  if (typeof v === "object") {
+    if (depth >= VALIDATOR_DEFAULTS.maxObjectDepth) {
+      throw new Error(`tool ${toolName}: arg "${key}" nested too deep (>${VALIDATOR_DEFAULTS.maxObjectDepth})`);
+    }
+    const subKeys = Object.keys(v);
+    if (subKeys.length > VALIDATOR_DEFAULTS.maxObjectKeys) {
+      throw new Error(`tool ${toolName}: arg "${key}" object too wide (${subKeys.length} keys > ${VALIDATOR_DEFAULTS.maxObjectKeys})`);
+    }
+    const out = {};
+    for (const sk of subKeys) out[sk] = validateArgValue(toolName, `${key}.${sk}`, v[sk], depth + 1);
+    return out;
+  }
+  throw new Error(`tool ${toolName}: arg "${key}" has unsupported type ${typeof v}`);
+}
+
 // --- transport -------------------------------------------------------------
 
 // One retry on transient 5xx or network errors; never retries on 4xx (client
@@ -2242,7 +2346,8 @@ async function handleRequest(req) {
       try {
         const handler = HANDLERS[params?.name];
         if (!handler) throw new Error(`Unknown tool: ${params?.name}`);
-        const result = await withSlot(() => handler(params?.arguments ?? {}));
+        const cleanArgs = validateToolArgs(params?.name, params?.arguments ?? {});
+        const result = await withSlot(() => handler(cleanArgs));
         return send({
           jsonrpc: "2.0",
           id,
