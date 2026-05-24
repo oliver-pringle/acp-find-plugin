@@ -411,6 +411,46 @@ To run against a self-hosted gateway, add an `env` block:
 }
 ```
 
+## Security & operational limits
+
+Since v0.10.1 the server includes runtime safeguards against malicious or
+buggy marketplace Resources. All defaults are conservative; the env vars
+below exist only as opt-outs.
+
+### SSRF guard (Resource calls)
+
+`acp_resource_call` rejects:
+
+- Non-http(s) URL schemes (`file:`, `ftp:`, `gopher:`, etc.)
+- Hostnames resolving to loopback / private / link-local / multicast / cloud-metadata IPs
+- HTTP 3xx redirects (no auto-follow)
+
+Set `ACP_ALLOW_LOOPBACK_RESOURCES=1` to permit `127.0.0.1` / `::1` /
+`localhost` resources when developing locally.
+
+### Response body caps
+
+| Path | Default | Env var |
+|------|---------|---------|
+| Resource calls (third-party) | 256 KB | `ACP_RESOURCE_BODY_LIMIT` |
+| Gateway calls (Metabot) | 2 MB | `ACP_GATEWAY_BODY_LIMIT` |
+
+Bodies are streamed; overruns abort the read and return a clear error
+rather than buffering. Set the env var to any positive integer (bytes).
+
+### Concurrency cap
+
+`ACP_MAX_CONCURRENT` caps in-flight `tools/call` invocations (default `8`,
+clamped to `1..64`). Excess calls FIFO-queue until a slot frees.
+`initialize` and `tools/list` bypass. Cancellation handling
+(`notifications/cancelled`) deferred to v0.11.0.
+
+### Verbose-log redaction
+
+When `ACP_VERBOSE=1`, the server strips query strings + fragments from
+URLs emitted to stderr — resource params can carry wallets or API tokens.
+Set `ACP_VERBOSE_FULL_URLS=1` to keep full URLs for local debugging.
+
 ## How it works
 
 ```
