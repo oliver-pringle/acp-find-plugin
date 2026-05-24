@@ -2,6 +2,30 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.10.1 — 2026-05-22 — Security patch
+
+Closes 4 runtime-exploitable findings from the 2026-05-22 audit. No new tools, no API changes; backward-compatible env-var opt-outs only.
+
+**Fixes**
+
+- **SSRF guard on `acp_resource_call`** (audit #1, high). Resource URLs must use `http:` or `https:`. Hostnames are DNS-resolved up front and rejected if they map to loopback (`127.0.0.0/8`, `::1`), private (`10/8`, `172.16/12`, `192.168/16`), link-local (`169.254/16` including cloud metadata, `fe80::/10`), multicast, broadcast, or IPv6 unique-local ranges. HTTP 3xx redirects are refused rather than followed. Opt-out for local-dev against a loopback bot via `ACP_ALLOW_LOOPBACK_RESOURCES=1`.
+- **Response body size caps** (audit #4). Resource calls capped at 256 KB (untrusted third party); gateway calls capped at 2 MB (trusted Metabot). Override via `ACP_RESOURCE_BODY_LIMIT` / `ACP_GATEWAY_BODY_LIMIT`. Bodies are drained via streaming reader and cancelled on overrun.
+- **Concurrency cap on `tools/call`** (audit #7). FIFO semaphore wraps every tool invocation; default 8 slots. Override via `ACP_MAX_CONCURRENT` (clamped 1..64). `initialize` and `tools/list` bypass. Cancellation handling (`notifications/cancelled`) deferred to v0.11.0.
+- **Verbose-log redaction** (audit #6). Query strings stripped from URLs emitted by the verbose logger by default. Resource params can carry wallets / API tokens; they no longer reach IDE/client log buffers. Opt-out via `ACP_VERBOSE_FULL_URLS=1`.
+
+**Deferred to v0.11.0**
+
+- Audit #2 (untrusted-marketplace-content prompt-injection envelope).
+- Audit #3 (central runtime input validator/clamping layer).
+- Audit #5 (`ACP_API_URL` scheme/host warning when key is sent to non-Metabot host).
+- Audit #8 (address normalization helper across all handlers).
+- Audit #9 (`marketplaceUrl` builder address-validation).
+- Audit #10 (README pinning / Docker digest guidance).
+
+**Migration**
+
+None. All changes are env-var-gated with secure defaults.
+
 ## 0.10.0 — 2026-05-20 — Cross-portfolio composition + OracleBot coverage + pagination
 
 Six new tools (31 → 37), four new slash commands (24 → 28). All additive; existing signatures and response shapes unchanged. MCP protocol version stays at `2025-11-25`.

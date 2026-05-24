@@ -1,6 +1,6 @@
 {
   "name": "acp-find",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace (V1 + V2), plus Degen Arena overlap, portfolio risk scoring (0-100 grade A-F), marketplace gap analysis, OracleBot drift detection, and one-call composites: hire-decision (find-and-rank), safe-quote (offering + verify), portfolio-status (10-bot snapshot). Helps you discover, evaluate, and orchestrate on-chain agents without leaving Claude Code.",
   "author": {
     "name": "Oliver Pringle",
