@@ -2,6 +2,32 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.11.0 — 2026-05-24 — Defensive depth
+
+Closes the 6 audit findings deferred from v0.10.1. Additive — every change is opt-out-able; existing callers see the same response shape with two new fields (`_warning`, `_untrusted`) added on marketplace-content tools, and any clearly-malformed input now returns a typed `isError` instead of silently reaching the gateway.
+
+**Fixes**
+
+- **Prompt-injection envelope** (audit #2). Every tool that surfaces marketplace-supplied text wraps its response with a top-level `_warning` explaining the trust boundary and tags every object containing third-party content with `_untrusted: true`. Tool descriptions in `tools/list` are updated to flag the trust boundary so LLMs see it before calling. 18 tools wrapped: 14 marketplace-content tools + 4 arena tools.
+- **Central input validator + clamping** (audit #3). New `validateToolArgs(name, args)` layer runs before every `tools/call` handler (and before the v0.10.1 concurrency semaphore). Enforces max string length (2048), array length (50), object depth (4), object key count (30), `0x`+40-hex address shape (also for elements of `agentAddresses` arrays), `chainId` whitelist (`1, 8453`), and per-arg numeric ranges (`limit` 1-50, `days` 1-365, `offset` 0-10000, `weeks` 1-52, `topN` 1-100, etc.).
+- **`ACP_API_URL` host/scheme guard** (audit #5). Server refuses to send `X-API-Key` over `http:` to a non-localhost host unless `ACP_ALLOW_PLAINTEXT_KEY=1`. Also warns when host is not `api.acp-metabot.dev`; silence with `ACP_ALLOW_CUSTOM_GATEWAY=1`. One-shot startup check; no per-request overhead.
+- **Address normalization** (audit #8). New `normalizeAddress(addr)` helper. Swept into `acp_agent_reputation`, `acp_agent_reputation_history`, `acp_browse_agent`, `acp_agent_resources`, `acp_resource_call` (replaces ad-hoc `String(...).toLowerCase()` patterns).
+- **`marketplaceUrl` validation** (audit #9). `agentUrl(addr)` now requires `0x`+40 hex and `encodeURIComponent`s the value before constructing the URL. Hardens against poisoned-indexer scenarios where a non-hex `agentAddress` would surface as a malformed marketplace URL.
+- **Supply-chain hardening docs** (audit #10). README "Production deployment" section recommends pinning `acp-find-mcp@0.11.0` and Docker digest pinning. SLSA provenance + SBOM flagged for v0.12.0.
+
+**New env vars (all default-secure)**
+
+- `ACP_ALLOW_PLAINTEXT_KEY` — override the refuse-to-send-key-over-plaintext default (warn-and-still-send when set).
+- `ACP_ALLOW_CUSTOM_GATEWAY` — silence the non-`api.acp-metabot.dev` host warning.
+
+**Behaviour changes (forward-compatible)**
+
+- Marketplace-content tool responses now include two new top-level fields: `_warning` (string) and per-record `_untrusted: true`. Existing callers that ignore unknown fields are unaffected.
+- Numeric args outside the documented ranges now throw `isError` with a clear "out of range" message. Calls that previously sent `limit: 1000` to the gateway now error at the MCP layer.
+- Non-hex `agentAddress` args throw `isError` with "0x followed by 40 hex chars" (existing test assertions preserved).
+
+**Tests:** 35 (was 22 before v0.10.1; +6 in v0.10.1, +7 in v0.11.0).
+
 ## v0.10.1 — 2026-05-22 — Security patch
 
 Closes 4 runtime-exploitable findings from the 2026-05-22 audit. No new tools, no API changes; backward-compatible env-var opt-outs only.
