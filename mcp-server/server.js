@@ -228,6 +228,13 @@ function isHexAddress(s) {
   return typeof s === "string" && /^0x[0-9a-fA-F]{40}$/.test(s.trim());
 }
 
+function normalizeAddress(addr) {
+  if (typeof addr !== "string" || !isHexAddress(addr)) {
+    throw new Error(`Invalid wallet address: ${String(addr ?? "").slice(0, 80)}`);
+  }
+  return addr.trim().toLowerCase();
+}
+
 // --- SSRF guard --------------------------------------------------------------
 // Blocks acp_resource_call from being weaponised into a request-from-MCP-host
 // vector. Default-deny on non-HTTP schemes and any IP resolving to loopback /
@@ -1385,7 +1392,7 @@ const HANDLERS = {
 
   acp_agent_reputation: async (args) => {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
-    const addr = String(args.agentAddress).trim().toLowerCase();
+    const addr = normalizeAddress(args.agentAddress);
     const url = `${API_URL}/v1/agentReputation?agent=${encodeURIComponent(addr)}`;
     const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
     if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
@@ -1416,7 +1423,7 @@ const HANDLERS = {
 
   acp_agent_reputation_history: async (args) => {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
-    const addr = String(args.agentAddress).trim().toLowerCase();
+    const addr = normalizeAddress(args.agentAddress);
     const days = typeof args.days === "number" ? args.days : 30;
     const result = await callGateway(
       `/v1/agentReputationHistory?agent=${encodeURIComponent(addr)}&days=${encodeURIComponent(days)}`,
@@ -1448,7 +1455,8 @@ const HANDLERS = {
 
   acp_browse_agent: async (args) => {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
-    const result = await callGateway(`/v1/agent/${encodeURIComponent(args.agentAddress)}`, undefined, "GET");
+    const addr = normalizeAddress(args.agentAddress);
+    const result = await callGateway(`/v1/agent/${encodeURIComponent(addr)}`, undefined, "GET");
     decorateMarketplaceUrls(result);
     return wrapUntrusted(result);
   },
@@ -1623,7 +1631,7 @@ const HANDLERS = {
 
   acp_agent_resources: async (args) => {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
-    const addr = String(args.agentAddress).trim().toLowerCase();
+    const addr = normalizeAddress(args.agentAddress);
     const result = await callGateway(
       `/v1/agent/${encodeURIComponent(addr)}/resources`,
       undefined,
@@ -1660,7 +1668,7 @@ const HANDLERS = {
   acp_resource_call: async (args) => {
     if (!args?.agentAddress) throw new Error("agentAddress is required");
     if (!args?.resourceName) throw new Error("resourceName is required");
-    const addr = String(args.agentAddress).trim().toLowerCase();
+    const addr = normalizeAddress(args.agentAddress);
     const name = String(args.resourceName).trim();
     const params = args.params && typeof args.params === "object" ? args.params : {};
 

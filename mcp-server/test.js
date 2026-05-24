@@ -958,3 +958,16 @@ test("plaintext non-localhost ACP_API_URL suppresses API key + warns", async () 
       `stderr should contain the suppression warning. Got: ${stderr}`);
   } finally { conn.close(); }
 });
+
+test("acp_browse_agent rejects malformed agentAddress", async () => {
+  const conn = startServer({});
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_browse_agent",
+        arguments: { agentAddress: "not-an-address" } } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /address|hex/i);
+  } finally { conn.close(); }
+});
