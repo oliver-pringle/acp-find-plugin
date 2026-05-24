@@ -746,3 +746,48 @@ test("acp_resource_call refuses to follow redirects", async () => {
     assert.match(r.result.content[0].text, /redirect/i);
   } finally { conn.close(); await gw.close(); await redirector.close(); }
 });
+
+test("acp_resource_call enforces ACP_RESOURCE_BODY_LIMIT", async () => {
+  // Inner stub streams ~1 MB; outer gateway points the resource URL at it.
+  // With a 64 KB cap, the call must error before fully draining.
+  const big = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.setHeader("transfer-encoding", "chunked");
+    res.write('{"data":"');
+    const chunk = "x".repeat(64 * 1024);
+    let sent = 0;
+    const iv = setInterval(() => {
+      res.write(chunk);
+      sent += chunk.length;
+      if (sent >= 1024 * 1024) {
+        clearInterval(iv);
+        res.write('"}');
+        res.end();
+      }
+    }, 5);
+  });
+  const gw = await startStubGateway((req, res) => {
+    if (req.url.startsWith("/v1/agent/")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        resources: [{ name: "huge", url: `${big.url}/feed` }]
+      }));
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  const conn = startServer({
+    ACP_API_URL: gw.url,
+    ACP_RESOURCE_BODY_LIMIT: "65536",
+    ACP_ALLOW_LOOPBACK_RESOURCES: "1",
+  });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_resource_call",
+        arguments: { agentAddress: "0x" + "a".repeat(40), resourceName: "huge" } } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /exceeded.*bytes/i);
+  } finally { conn.close(); await gw.close(); await big.close(); }
+});

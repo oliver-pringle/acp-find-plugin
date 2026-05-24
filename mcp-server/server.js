@@ -195,6 +195,50 @@ async function validateResourceUrl(rawUrl) {
   return resolved[0].address;
 }
 
+// --- response-body size caps -------------------------------------------------
+// Drain a fetch body via streaming reader, aborting if it exceeds maxBytes.
+// Resource calls (untrusted third party) get a smaller cap; gateway calls
+// (trusted Metabot) get a larger one. Both override via env. Returns a
+// Response-shape wrapper so callers can call .text() / .json() unchanged.
+
+const RESOURCE_BODY_LIMIT = Math.max(1, Number(process.env.ACP_RESOURCE_BODY_LIMIT) || 256 * 1024);
+const GATEWAY_BODY_LIMIT  = Math.max(1, Number(process.env.ACP_GATEWAY_BODY_LIMIT)  || 2 * 1024 * 1024);
+
+async function readBodyWithLimit(res, maxBytes, where) {
+  if (!res.body) {
+    const text = await res.text();
+    if (text.length > maxBytes) {
+      throw new Error(`Response body from ${where} exceeded ${maxBytes} bytes`);
+    }
+    return makeBufferedResponse(res, Buffer.from(text, "utf8"));
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch {}
+      throw new Error(`Response body from ${where} exceeded ${maxBytes} bytes`);
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return makeBufferedResponse(res, Buffer.concat(chunks));
+}
+
+function makeBufferedResponse(orig, buf) {
+  return {
+    ok: orig.ok,
+    status: orig.status,
+    statusText: orig.statusText,
+    headers: orig.headers,
+    text: async () => buf.toString("utf8"),
+    json: async () => JSON.parse(buf.toString("utf8")),
+  };
+}
+
 // --- transport -------------------------------------------------------------
 
 // One retry on transient 5xx or network errors; never retries on 4xx (client
@@ -230,10 +274,14 @@ async function callGateway(path, body, method = "POST") {
   logVerbose(`→ ${method} ${path}`);
   const res = await fetchWithRetry(`${API_URL}${path}`, init);
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    // Error bodies are best-effort — slice to 4 KB so huge upstream errors
+    // don't blow up logs, and never fail on overrun.
+    let text = "";
+    try { text = (await res.text()).slice(0, 4096); } catch {}
     throw new Error(`${path} returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`);
   }
-  const json = await res.json();
+  const bounded = await readBodyWithLimit(res, GATEWAY_BODY_LIMIT, `${API_URL}${path}`);
+  const json = await bounded.json();
   logVerbose(`← ${method} ${path} ${res.status} (${Date.now() - startedAt}ms)`);
   return json;
 }
@@ -1451,10 +1499,11 @@ const HANDLERS = {
       );
     }
 
-    const ctype = (resp.headers.get("content-type") || "").toLowerCase();
+    const bounded = await readBodyWithLimit(resp, RESOURCE_BODY_LIMIT, callUrl.toString());
+    const ctype = (bounded.headers.get("content-type") || "").toLowerCase();
     const response = ctype.includes("application/json")
-      ? await resp.json()
-      : { rawText: await resp.text() };
+      ? await bounded.json()
+      : { rawText: await bounded.text() };
 
     return {
       agentAddress: addr,
