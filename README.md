@@ -12,6 +12,10 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.12.1 (2026-05-25)
+
+Surfaces **Metabot v1.10.1's marketplaceGap V1/V2 slice**. One new optional field on `acp_marketplace_gap` (and the underlying `POST /v1/marketplace/gap` endpoint): `marketplace?: "v1" | "v2" | "both"`. **Default flips from `"both"` to `"v2"`** — V2 is the marketplace where new ACP-v2 bots actually deploy, so V2-only is the relevant denominator for the offering's "where should I build?" use case. Pass `marketplace: "both"` to recover the pre-v0.12.1 default. Near-dup edges still cross marketplaces, so the `"both"` numbers are identical to pre-v0.12.1. The `/acp-find:marketplace-gap` slash command parser now accepts BOTH a positional `v1`/`v2`/`both` keyword AND a `marketplace:<value>` named flag (flag wins on conflict). Tool count stays at 39; slash count stays at 30. Forward-compatible against old gateways (they silently ignore the field). 40 tests (unchanged).
+
 ## What's new in v0.12.0 (2026-05-24)
 
 Surfaces TheMetaBot v1.10 Phase 1+2+3 to MCP clients. Two new tools wrap Metabot's new $0.05 paid Phase 3 offerings: **`acp_search_narrative`** (Claude-narrated 3-5 sentence summary of top-N marketplace results + per-result reasoning) and **`acp_agent_risk_check`** (ACP-seller-specific 0-100 scam-risk score with tier + per-signal detail — distinct from the multi-bot `acp_risk_snapshot`). `acp_find` gains 9 new optional fields for Phase 1+2 — negative filters (`excludeRequirements`, `excludeAgents`, `excludeChains`, `maxPriceUsd`), unified search (`includeResources`), sub-offering filters (`requiresField`, `producesField`), and Phase 3 toggles (`expand`, `includeRisk`). Two new slash commands (`/acp-find:narrate`, `/acp-find:risk-check`). Tool count 37 → 39; slash count 28 → 30. All additive, forward-compatible. Metabot v1.10 Phase 3 isn't deployed yet — the two new tools will 404 until it lands. 40 tests.

@@ -1202,7 +1202,7 @@ const TOOLS = [
   {
     name: "acp_marketplace_gap",
     description:
-      "Ranked underserved ACP marketplace niches. Returns top-N categories by opportunityScore (saturation × inverse density), each tagged with a recommendationTag (saturated_avoid | high_volume_low_density | medium_volume_emerging | niche_underserved | balanced). Use to answer 'where should I build a new ACP bot?' or 'what does the marketplace need more of?'. Backs Metabot v1.9 marketplaceGap ($0.30).",
+      "Ranked underserved ACP marketplace niches. Returns top-N categories by opportunityScore (saturation × inverse density), each tagged with a recommendationTag (saturated_avoid | high_volume_low_density | medium_volume_emerging | niche_underserved | balanced). Use to answer 'where should I build a new ACP bot?' or 'what does the marketplace need more of?'. Backs Metabot v1.9 marketplaceGap ($0.30). v0.12.1: accepts marketplace ∈ {v1, v2, both} (default 'v2' — the marketplace new ACP bots actually deploy to). Pass marketplace:'both' for the pre-v0.12.1 combined-corpus view.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1215,6 +1215,11 @@ const TOOLS = [
           description: "Max opportunities to return (1-20). Default 5.",
           minimum: 1,
           maximum: 20
+        },
+        marketplace: {
+          type: "string",
+          enum: ["v1", "v2", "both"],
+          description: "Optional. Which marketplace pool to score. 'v1' = legacy acpx.virtuals.io. 'v2' (default) = modern api.acp.virtuals.io — the relevant denominator for new ACP-v2 bot decisions. 'both' = combined pool, matches the pre-v0.12.1 default."
         }
       }
     }
@@ -2149,6 +2154,16 @@ const HANDLERS = {
     }
     if (typeof args?.limit === "number" && args.limit > 0) {
       body.limit = Math.min(20, Math.max(1, Math.floor(args.limit)));
+    }
+    // v0.12.1 — marketplace slice. The C# endpoint validates the enum + 400s
+    // unknowns; we coerce case/whitespace here so the slash-command parser
+    // doesn't need to. Omitting the field lets the C# endpoint apply its
+    // own "v2" default (Q2 BC shift).
+    if (typeof args?.marketplace === "string") {
+      const m = args.marketplace.trim().toLowerCase();
+      if (m === "v1" || m === "v2" || m === "both") {
+        body.marketplace = m;
+      }
     }
     return callGateway("/v1/marketplace/gap", body, "POST");
   },

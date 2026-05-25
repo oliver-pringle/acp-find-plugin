@@ -11,6 +11,24 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.12.1
+
+Surfaces **Metabot v1.10.1's marketplaceGap V1/V2 slice**. One optional field added to `acp_marketplace_gap`; one slash command parser updated. **Tool count stays at 39**; slash command count stays at **30**.
+
+> **Behaviour change.** `acp_marketplace_gap` (and the underlying `POST /v1/marketplace/gap` gateway endpoint) now default to **`marketplace: "v2"`** when the field is omitted. Pre-v0.12.1 default was the combined V1+V2 corpus. Pass `marketplace: "both"` explicitly to recover the prior behaviour. Why the shift: V2 is the marketplace where new ACP-v2 bots actually deploy, so V2-only is the relevant denominator for the offering's "where should I build?" use case.
+
+- **New input field on `acp_marketplace_gap`:** `marketplace?: "v1" | "v2" | "both"`. Default `"v2"`. The gateway rejects unknowns with `400 invalid_marketplace`; the MCP wrapper coerces case + whitespace before forwarding. Echoed on the response as `response.marketplace`.
+- **`/acp-find:marketplace-gap` parser accepts both forms:**
+  - Positional keyword: `/acp-find:marketplace-gap v2`, `/acp-find:marketplace-gap both`, etc. The three tokens are RESERVED — never get parsed as part of a category name.
+  - Named flag: `/acp-find:marketplace-gap marketplace:v1`.
+  - Flag wins on conflict. Omit both for the new `"v2"` default.
+- **Near-dup edges still cross marketplaces** — a V1↔V2 near-dup pair marks both ids as saturated in their respective slice. The `"both"` numbers are identical to pre-v0.12.1 (only the `"v1"` / `"v2"` slices are new signal).
+- **V2-only mode tag caveat:** `recommendationTag` thresholds are global. When `marketplace="v2"` is selected most categories will tag as `niche_underserved` or `balanced` because V2 has lower per-category density. Use `opportunityScore` as the primary ranking signal when comparing V2 rows.
+
+**Gateway dependency.** The new `marketplace` field is honoured by `api.acp-metabot.dev` once Metabot v1.10.1 deploys. Old gateways silently ignore the field (response reverts to the pre-marketplace-field shape), so `acp-find-mcp@0.12.1` is fully forward-compatible. The V1/V2 split only activates against an up-to-date gateway.
+
+40 tests (unchanged — the addition is fully exercised via the existing gateway-handler tests and the v1.10.1 C# test suite on the Metabot side; no new MCP-level smoke needed).
+
 ## What's new in v0.12.0
 
 Surfaces **TheMetaBot v1.10 Phase 1+2+3** to MCP clients. **Additive** — existing tools unchanged. Tool count **37 → 39**; slash count **28 → 30**.
@@ -232,7 +250,7 @@ Wraps TheMetaBot v1.8 portfolio-risk pipeline + v1.9 marketplace pack. Risk endp
 | `acp_risk_deep_dive` | `walletAddress`, `chain?` | Full sub-component breakdown with live RPC reads (active borrows, top approvals, recent MEV-bundled txs, reputation trajectory) + per-dimension recommendations. ~3-5 sec per call. |
 | `acp_risk_compare` | `walletAddresses` (2-5), `chain?` | Side-by-side risk for 2-5 EVM wallets. Distinct from `acp_compare_agents` (which compares ACP-seller reputation + offerings) — `risk_compare` works on any wallet. |
 | `acp_risk_attestation` | `walletAddress`, `chain?` | Risk snapshot wrapped in a structured attestation envelope. Includes `attestationUid` + `txHash` + `blockNumber` when Metabot has published the attestation on-chain via EASIssuer (Base mainnet). |
-| `acp_marketplace_gap` | `category?`, `limit?` (1-20, default 5) | Ranked underserved ACP categories by `opportunityScore` (saturation × inverse density). Each row carries `recommendationTag` ∈ {`saturated_avoid`, `high_volume_low_density`, `medium_volume_emerging`, `niche_underserved`, `balanced`}. Answers "where should I build a new ACP bot?". |
+| `acp_marketplace_gap` | `category?`, `limit?` (1-20, default 5), `marketplace?` (`v1`/`v2`/`both`, default `v2` since v0.12.1) | Ranked underserved ACP categories by `opportunityScore` (saturation × inverse density). Each row carries `recommendationTag` ∈ {`saturated_avoid`, `high_volume_low_density`, `medium_volume_emerging`, `niche_underserved`, `balanced`}. Answers "where should I build a new ACP bot?". v0.12.1: default flipped from `both` to `v2` — pass `marketplace: "both"` to recover the prior corpus-wide view. |
 | `acp_risk_sources` | — | Per-source health (`fresh`/`stale`/`unavailable`) for LiquidGuard, RevokeBot, MEVProtect, and TheMetaBot's reputation lane, plus an overall `verdict` (`FRESH` / `DEGRADED` / `UNAVAILABLE`). Cached 5 min. Free Metabot Resource. |
 | `acp_risk_rubric` | — | Methodology behind the score: weights per component, grade bands (A=85+ / B=70+ / C=55+ / D=40+ / F), bucket tables. Cached 5 min. Free Metabot Resource. |
 | `acp_agent_verify` ⭐ | `walletAddress`, `chain?`, `depth?` (`lite`/`full`, default `full`) | **Composite pre-hire safety check.** Runs reputation + arena + recentJobs + risk_snapshot in parallel and synthesises a rule-based verdict (`STRONG_BUY` / `OK` / `CAUTION` / `AVOID` / `UNKNOWN`) + headline. `depth: 'lite'` skips recentJobs (3 sub-calls instead of 4). Errors in any sub-call surface as `{ error }` inside that dimension; partial verdicts are explicitly allowed. |

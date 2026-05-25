@@ -2,6 +2,52 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.12.1 — 2026-05-25 — marketplaceGap V1/V2 slice
+
+Surfaces Metabot v1.10.1's marketplace-slice extension to `marketplaceGap`. One field added to `acp_marketplace_gap`; one slash command parser updated. Additive at the field level — but the **endpoint's default flips from `"both"` to `"v2"`**, so existing callers that omit `marketplace` will start seeing V2-only results. This is deliberate: V2 is the marketplace where new ACP-v2 bots actually deploy, so V2-only is the relevant denominator for the offering's primary "where should I build?" use case. Tool count stays at **39**; slash command count stays at **30**.
+
+### Behaviour change — read me first
+
+The `acp_marketplace_gap` tool's underlying gateway endpoint (`POST /v1/marketplace/gap`, backing Metabot's $0.30 `marketplaceGap` offering) now defaults to `marketplace: "v2"` when the field is omitted. Pre-v0.12.1 default was "combined V1+V2 corpus". To recover the prior behaviour, pass `marketplace: "both"` explicitly.
+
+This affects:
+- Direct `acp_marketplace_gap` MCP calls that don't set `marketplace`.
+- `/acp-find:marketplace-gap` slash command invocations without a positional `v1`/`v2`/`both` keyword or `marketplace:` flag.
+- Direct `POST /v1/marketplace/gap` HTTP calls to `api.acp-metabot.dev` that don't include `marketplace` in the body.
+
+Near-duplicate edges still cross marketplaces — a V1 offering near-duped to a V2 offering bumps both ids in their respective slice (and the `"both"` slice produces identical numbers to pre-v0.12.1).
+
+### New input field on `acp_marketplace_gap`
+
+- `marketplace?: "v1" | "v2" | "both"` — Which marketplace pool to compute saturation against. Default `"v2"`. Echoed on the response as `response.marketplace`. Invalid values are rejected by the gateway with `400 invalid_marketplace`; the MCP wrapper coerces case + whitespace before forwarding.
+
+### New response field
+
+- `marketplace: "v1" | "v2" | "both"` — Echo of the resolved marketplace slice ("v2" when omitted, post-v0.12.1).
+
+### `/acp-find:marketplace-gap` parser
+
+Now accepts BOTH a positional keyword (`v1`/`v2`/`both`) and a named flag (`marketplace:v1|v2|both`). When both are supplied the flag wins. The three tokens are RESERVED — they never get parsed as part of a category name. Examples:
+
+- `/acp-find:marketplace-gap` — defaults to v2.
+- `/acp-find:marketplace-gap both` — pre-v0.12.1 default reachable via keyword.
+- `/acp-find:marketplace-gap "Trading Bots" v2 limit:10` — combined.
+- `/acp-find:marketplace-gap marketplace:v1` — named flag form.
+
+The slash command's render adds a sub-headline showing the resolved slice + a "new default 2026-05-25" callout on the v2 path for the first month post-release.
+
+### Threshold caveat for V2-only mode
+
+`recommendationTag` thresholds are global (`saturated_avoid` ≥ 0.70, `high_volume_low_density` ≥ 100 total + <0.40 sat, `medium_volume_emerging` ≥ 30 + <0.50, `niche_underserved` <30 + <0.40, else `balanced`). When `marketplace="v2"` is selected most categories will tag as `niche_underserved` or `balanced` because V2 has lower per-category density than the combined corpus. Use `opportunityScore` as the primary ranking signal when comparing V2 rows. (This is by design — separate per-slice thresholds were considered and deferred per spec Q1.)
+
+### Gateway dependency
+
+Metabot v1.10.1's `/v1/marketplace/gap` endpoint is the source of truth for the new `marketplace` field. The v0.12.1 MCP package is fully forward-compatible against pre-v1.10.1 gateways — the field is just silently ignored by old gateways and the response reverts to today's pre-marketplace-field shape. So `acp-find-mcp@0.12.1` works against any gateway, but only delivers the V1/V2 split when paired with `api.acp-metabot.dev` running Metabot v1.10.1.
+
+### Compatibility
+
+Field-level additive. Default-level breaking (Q2 resolution). MCP protocol version: `2025-11-25` (unchanged). Existing 39 tools, 30 slash commands, and every env var carry forward unchanged.
+
 ## v0.12.0 — 2026-05-24 — Surface Metabot v1.10 (Phase 1+2+3)
 
 Surfaces TheMetaBot v1.10 to MCP clients. Additive — every existing tool keeps identical signatures and response shapes. The 9 new optional fields on `acp_find` are forward-compatible: old plugin clients keep working against the new gateway, and old gateways silently ignore the new fields. Tool count **37 → 39**; slash command count **28 → 30**.
