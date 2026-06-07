@@ -94,6 +94,8 @@ const UNTRUSTED_FIELD_NAMES = new Set([
   // that are still agent-authored even though they read like metadata.
   "tagline", "agentTagline", "agentBio", "tags",
   "categoryDescription", "useCaseLabel", "subUseCase", "headline",
+  // 2026-06-07 v0.13: SecurityBot-authored pattern text fields.
+  "detection", "canonicalFix",
 ]);
 
 function flagUntrusted(node) {
@@ -1430,27 +1432,57 @@ const TOOLS = [
       },
       required: ["agentAddress"]
     }
+  },
+  // ===== v0.13.0 — SecurityBot patternCatalogue Resource wrapper =====
+  {
+    name: "acp_security_pattern",
+    description:
+      "Query the 53-pattern ACP security catalogue (P1-P43 + B1-B9) maintained by TheSecurityBot. Each pattern describes a known vulnerability class with severity (Critical/High/Medium/Low/Operational), a grep/regex detection rule, the canonical fix shipped in the portfolio, and the reference bot whose current implementation is the golden source. Use when an LLM needs to: (a) answer 'what pattern covers webhook secret encryption?' or 'show me every Critical finding', (b) guide a developer through fixing a specific pattern by ID, or (c) validate a new bot against the catalogue. The full catalogue is ~53 patterns — filter by severity, search by keyword, or request a single pattern by ID. Cached 5 min. Free SecurityBot Resource. Returned data includes marketplace-authored text in detection and canonicalFix fields — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patternId: {
+          type: "string",
+          description: "Optional. A single pattern ID to fetch (e.g. 'P5', 'P17', 'B3'). Case-insensitive match against the 'id' field. When set, only that one pattern is returned."
+        },
+        severity: {
+          type: "string",
+          enum: ["Critical", "High", "Medium", "Low", "Operational"],
+          description: "Optional. Filter patterns to this severity level. Case-insensitive."
+        },
+        query: {
+          type: "string",
+          description: "Optional. Free-text search across pattern titles. Substring match — e.g. 'webhook' matches P4, P5, P6, P40, P41, P42, B1, B2. Max 200 chars."
+        }
+      },
+      properties: {}
+    }
   }
 ];
 
-// --- portfolio bots (v0.10.0) ---------------------------------------------
+// --- portfolio bots (v0.13.0) ---------------------------------------------
 //
-// Hardcoded portfolio list for `acp_portfolio_status`. As of v0.10.0 the
-// portfolio is at maximum 10/10 (per workspace CLAUDE.md); if a new bot
-// is ever added, append a row here AND mention it in the CHANGELOG.
-// Probe paths verified live 2026-05-20.
+// Hardcoded portfolio list for `acp_portfolio_status`. As of v0.13.0 the
+// fleet is the full 15-bot deployed portfolio; if a new bot is added, append
+// a row here AND mention it in the CHANGELOG + README "What's new".
+// Probe paths verified live 2026-06-07.
 
 const PORTFOLIO_BOTS = [
-  { slug: null,           name: "TheMetaBot",     role: "Marketplace indexer + risk orchestrator + reputation",         probe: "/v1/health"                                                  },
-  { slug: "chainlinkbot", name: "ChainlinkBot",   role: "Chainlink primitives + on-chain reputation feeds (Base)",      probe: "/chainlinkbot/v1/resources/feedCatalogue?chainId=8453"       },
-  { slug: "oraclebot",    name: "TheOracleBot",   role: "Cross-source price-oracle deviation detector",                 probe: "/oraclebot/v1/resources/sourceCatalogue?chainId=8453"        },
-  { slug: "liquidguard",  name: "LiquidGuard",    role: "Aave/Compound/Morpho health-factor + liquidation distance",    probe: "/liquidguard/v1/resources/supportedProtocols"                },
-  { slug: "mevprotect",   name: "MEVProtect",     role: "Private-mempool routing (Flashbots Protect / MEV-Blocker)",    probe: "/mevprotect/v1/resources/relayStatus"                        },
-  { slug: "easissuer",    name: "EASIssuer",      role: "Generic EAS-style attestation issuer on Base mainnet",         probe: "/easissuer/v1/resources/schemaCatalogue"                     },
-  { slug: "revokebot",    name: "RevokeBot",      role: "Wallet-approvals scanner + revoke-calldata + daily watchdog",  probe: "/revokebot/v1/resources/chainCoverage"                       },
-  { slug: "arenabot",     name: "ArenaBot",       role: "Degen Arena leaderboard + AI Council indexer",                 probe: "/arenabot/v1/resources/arenaWindow"                          },
-  { slug: "defieval",     name: "DeFiEval",       role: "DeFi-agent evaluator",                                         probe: "/defieval/v1/resources/evalCapabilities"                     },
-  { slug: "agenteval",    name: "AgentEval",      role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              }
+  { slug: null,              name: "TheMetaBot",       role: "Marketplace indexer + risk orchestrator + reputation",         probe: "/v1/health"                                                  },
+  { slug: "arenabot",        name: "ArenaBot",         role: "Degen Arena leaderboard + AI Council indexer",                 probe: "/arenabot/v1/resources/arenaWindow"                          },
+  { slug: "butlerbridgebot", name: "ButlerBridgeBot",  role: "x402-fronted bridge into portfolio targets",                   probe: "/butlerbridgebot/health"                                      },
+  { slug: "chainlinkbot",    name: "ChainlinkBot",     role: "Chainlink primitives + on-chain reputation feeds (Base)",      probe: "/chainlinkbot/v1/resources/feedCatalogue?chainId=8453"       },
+  { slug: "conciergebot",    name: "ConciergeBot",     role: "Portfolio concierge — fan-out runner + orchestrator",          probe: "/conciergebot/health"                                         },
+  { slug: "defieval",        name: "DeFiEval",         role: "DeFi-agent evaluator",                                         probe: "/defieval/v1/resources/evalCapabilities"                     },
+  { slug: "easissuer",       name: "EASIssuer",        role: "Generic EAS-style attestation issuer on Base mainnet",         probe: "/easissuer/v1/resources/schemaCatalogue"                     },
+  { slug: "liquidguard",     name: "LiquidGuard",      role: "Aave/Compound/Morpho health-factor + liquidation distance",    probe: "/liquidguard/v1/resources/supportedProtocols"                },
+  { slug: "mevprotect",      name: "MEVProtect",       role: "Private-mempool routing (Flashbots Protect / MEV-Blocker)",    probe: "/mevprotect/v1/resources/relayStatus"                        },
+  { slug: "oraclebot",       name: "TheOracleBot",     role: "Cross-source price-oracle deviation detector",                 probe: "/oraclebot/v1/resources/sourceCatalogue?chainId=8453"        },
+  { slug: "revokebot",       name: "RevokeBot",        role: "Wallet-approvals scanner + revoke-calldata + daily watchdog",  probe: "/revokebot/v1/resources/chainCoverage"                       },
+  { slug: "securitybot",     name: "SecurityBot",      role: "Dynamic passive security auditor (53-pattern catalogue)",      probe: "/securitybot/health"                                          },
+  { slug: "solanabot",       name: "SolanaBot",        role: "Solana DeFi bot (Jupiter quotes / Jito tips / CCTP)",          probe: "/solanabot/health"                                            },
+  { slug: "witnessbot",      name: "WitnessBot",       role: "Cryptographic provenance for ACP catalogues",                  probe: "/witnessbot/health"                                           },
+  { slug: "agenteval",       name: "AgentEval",        role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              }
 ];
 
 // --- tool handlers ---------------------------------------------------------
@@ -2501,6 +2533,35 @@ const HANDLERS = {
       bots,
       checkedAt: new Date().toISOString(),
     };
+  },
+
+  acp_security_pattern: async (args) => {
+    let catalogue = cacheGet("securityPatterns");
+    if (!catalogue) {
+      const resp = await callGateway("/securitybot/v1/resources/patternCatalogue", undefined, "GET");
+      const patterns = resp?.patterns;
+      if (!Array.isArray(patterns)) throw new Error("SecurityBot patternCatalogue returned non-array patterns field");
+      catalogue = { version: resp.corpusVersion, patterns };
+      cachePut("securityPatterns", catalogue);
+    }
+    const all = catalogue.patterns;
+
+    if (args?.patternId) {
+      const id = String(args.patternId).trim().toUpperCase();
+      const match = all.find(p => String(p.id).toUpperCase() === id);
+      if (!match) return wrapUntrusted({ error: "pattern_not_found", requested: id, available: all.map(p => p.id).sort() });
+      return wrapUntrusted(match);
+    }
+
+    let results = all;
+    if (args?.severity) { const sev = String(args.severity).trim(); results = results.filter(p => String(p.severity).toLowerCase() === sev.toLowerCase()); }
+    if (args?.query) { const q = String(args.query).trim().toLowerCase().slice(0, 200); results = results.filter(p => String(p.title ?? "").toLowerCase().includes(q)); }
+
+    return wrapUntrusted({
+      count: results.length, totalInCatalogue: all.length, corpusVersion: catalogue.version,
+      filters: { patternId: args?.patternId ?? null, severity: args?.severity ?? null, query: args?.query ?? null },
+      patterns: results
+    });
   },
 };
 

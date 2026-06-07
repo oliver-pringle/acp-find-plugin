@@ -2,6 +2,22 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.13.0 — 2026-06-07 — SecurityBot catalogue + portfolio expansion
+
+Two changes, both additive — no existing signatures change. Tool count 39→40; slash command count 30→31.
+
+### Added
+
+- **`acp_security_pattern`** — NEW MCP tool wrapping SecurityBot's free `patternCatalogue` Resource. Returns the full 53-pattern security catalogue (P1-P43 + B1-B9) maintained by TheSecurityBot. Supports filtering by severity (`Critical`/`High`/`Medium`/`Low`/`Operational`), free-text search across pattern titles, and single-pattern lookup by ID. Each pattern includes a detection rule, canonical fix, and reference bot. Cached 5 min — single gateway call per cache window regardless of how many filtered queries the user fires. Free SecurityBot Resource — no API key required.
+
+- **PORTFOLIO_BOTS 10→15** — The hardcoded bot list in `acp_portfolio_status` now covers all 15 deployed portfolio bots. Five bots added (alphabetical by slug): ButlerBridgeBot, ConciergeBot, SecurityBot, SolanaBot, WitnessBot. All probe paths verified live 2026-06-07 via `/<slug>/health` (200 OK), no auth required.
+
+- **New slash command:** `/acp-find:security-pattern` — query the security catalogue inline. Supports `[<id>]` + `severity:<level>` + `search:<term>`.
+
+- **`detection` and `canonicalFix`** fields added to `UNTRUSTED_FIELD_NAMES` — these SecurityBot-authored text fields are now flagged with `_untrusted:true` when the untrusted-content envelope is active.
+
+- **`commands/portfolio-status.md`** updated to reflect 15-bot count.
+
 ## v0.12.1 — 2026-05-25 — marketplaceGap V1/V2 slice
 
 Surfaces Metabot v1.10.1's marketplace-slice extension to `marketplaceGap`. One field added to `acp_marketplace_gap`; one slash command parser updated. Additive at the field level — but the **endpoint's default flips from `"both"` to `"v2"`**, so existing callers that omit `marketplace` will start seeing V2-only results. This is deliberate: V2 is the marketplace where new ACP-v2 bots actually deploy, so V2-only is the relevant denominator for the offering's primary "where should I build?" use case. Tool count stays at **39**; slash command count stays at **30**.

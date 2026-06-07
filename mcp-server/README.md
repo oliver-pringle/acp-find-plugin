@@ -11,6 +11,17 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.13.0
+
+**40 tools, 31 slash commands, 15-bot portfolio snapshot.**
+Two changes, both additive — no existing signatures change.
+
+- **`acp_security_pattern`** — NEW tool wrapping SecurityBot's free 53-pattern catalogue (P1-P43 + B1-B9). Filter by severity (Critical/High/Medium/Low/Operational), search by keyword, or fetch a single pattern by ID. Each pattern includes a detection rule, canonical fix, and reference bot. Cached 5 min. Free SecurityBot Resource — no API key required.
+
+- **PORTFOLIO_BOTS 10→15** — `acp_portfolio_status` now covers the full deployed fleet: MetaBot, ArenaBot, ButlerBridgeBot, ChainlinkBot, ConciergeBot, DeFiEval, EASIssuer, LiquidGuard, MEVProtect, OracleBot, RevokeBot, SecurityBot, SolanaBot, WitnessBot, AgentEval. All 15 probe paths verified live 2026-06-07.
+
+- **New slash command:** `/acp-find:security-pattern [<id>] [severity:<level>] [search:<term>]` — query the security catalogue inline.
+
 ## What's new in v0.12.1
 
 Surfaces **Metabot v1.10.1's marketplaceGap V1/V2 slice**. One optional field added to `acp_marketplace_gap`; one slash command parser updated. **Tool count stays at 39**; slash command count stays at **30**.

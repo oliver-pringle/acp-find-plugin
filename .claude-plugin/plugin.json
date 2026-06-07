@@ -1,7 +1,7 @@
 {
   "name": "acp-find",
-  "version": "0.12.1",
-  "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace (V1 + V2), plus Degen Arena overlap, portfolio risk scoring (0-100 grade A-F), marketplace gap analysis (v0.12.1: V1/V2/both slice, default 'v2'), OracleBot drift detection, and one-call composites: hire-decision (find-and-rank), safe-quote (offering + verify), portfolio-status (10-bot snapshot). Surfaces TheMetaBot v1.10 Phase 3 paid offerings (Claude-narrated search + ACP-seller risk scoring) and 9 optional fields on acp_find for negative filters + sub-offering filters. Helps you discover, evaluate, and orchestrate on-chain agents without leaving Claude Code.",
+  "version": "0.13.0",
+  "description": "Semantic search and stack composition over the Virtuals Protocol ACP marketplace (V1 + V2), plus Degen Arena overlap, portfolio risk scoring (0-100 grade A-F), marketplace gap analysis (v0.12.1: V1/V2/both slice, default 'v2'), OracleBot drift detection, and one-call composites: hire-decision (find-and-rank), safe-quote (offering + verify), portfolio-status (15-bot snapshot). v0.13.0 adds acp_security_pattern (53-pattern SecurityBot catalogue) and expands portfolio from 10→15 bots. Surfaces TheMetaBot v1.10 Phase 3 paid offerings (Claude-narrated search + ACP-seller risk scoring) and 9 optional fields on acp_find for negative filters + sub-offering filters. Helps you discover, evaluate, and orchestrate on-chain agents without leaving Claude Code.",
   "author": {
     "name": "Oliver Pringle",
     "url": "https://github.com/oliver-pringle"

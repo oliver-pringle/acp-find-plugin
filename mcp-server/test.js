@@ -122,6 +122,7 @@ const EXPECTED_TOOLS = [
   "acp_safe_quote",
   "acp_search_agents",
   "acp_search_narrative",
+  "acp_security_pattern",
   "acp_today",
   "acp_watch_status"
 ];
@@ -149,7 +150,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 39 tools with required schemas", async () => {
+test("tools/list returns all 40 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -722,7 +723,7 @@ test("acp_safe_quote validates required args + address shape", async () => {
   }
 });
 
-test("acp_portfolio_status returns 10-bot envelope even when all probes fail", async () => {
+test("acp_portfolio_status returns 15-bot envelope even when all probes fail", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -736,8 +737,8 @@ test("acp_portfolio_status returns 10-bot envelope even when all probes fail", a
     assert.equal(r.result.isError, undefined,
       "portfolio_status should not surface as isError even when probes fail");
     const parsed = JSON.parse(r.result.content[0].text);
-    assert.equal(parsed.count, 10);
-    assert.equal(parsed.bots.length, 10);
+    assert.equal(parsed.count, 15);
+    assert.equal(parsed.bots.length, 15);
     assert.equal(parsed.healthyCount, 0, "broken URL means no bot is reachable");
     for (const bot of parsed.bots) {
       assert.ok(bot.name && bot.role, "each bot must carry name + role");
@@ -1178,5 +1179,75 @@ test("agentUrl returns no marketplaceUrl for non-hex addresses (indexer poisonin
     assert.ok(evil, "expected EvilBot record in results");
     assert.equal(evil.marketplaceUrl, undefined,
       "poisoned-address record must not have marketplaceUrl");
+  } finally { conn.close(); await gw.close(); }
+});
+
+test("tools/call with acp_security_pattern patternId=\"P5\" returns single pattern", async () => {
+  const gw = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/securitybot/v1/resources/patternCatalogue" && req.method === "GET") {
+      res.end(JSON.stringify({
+        corpusVersion: "2026-05-30",
+        count: 3,
+        patterns: [
+          { id: "P4", title: "Webhook signing-key reuse across bots", severity: "High", detection: "grep for shared keys", canonicalFix: "generate per-bot keys", referenceBot: "ACP_OracleBot" },
+          { id: "P5", title: "Webhook secret encryption at rest", severity: "High", detection: "grep for plaintext secrets", canonicalFix: "encrypt with KMS", referenceBot: "ACP_SolanaBot" },
+          { id: "B1", title: "Bridge relayer nonce gap", severity: "Medium", detection: "check nonce sequence", canonicalFix: "gap-aware nonce mgr", referenceBot: "ACP_ButlerBridge" }
+        ]
+      }));
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_security_pattern", arguments: { patternId: "P5" } } });
+    assert.equal(r.result.isError, undefined,
+      `expected success, got error: ${r.result.content?.[0]?.text}`);
+    const parsed = JSON.parse(r.result.content[0].text);
+    assert.equal(parsed.id, "P5", `expected P5, got ${parsed.id}`);
+    assert.equal(parsed.severity, "High");
+    assert.match(parsed.title, /encryption/i);
+  } finally { conn.close(); await gw.close(); }
+});
+
+test("tools/call with acp_security_pattern severity=\"Critical\" returns filtered patterns", async () => {
+  const gw = await startStubGateway((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/securitybot/v1/resources/patternCatalogue" && req.method === "GET") {
+      res.end(JSON.stringify({
+        corpusVersion: "2026-05-30",
+        count: 5,
+        patterns: [
+          { id: "P1", title: "Dev-mode auth bypass", severity: "Critical", detection: "check debug flag", canonicalFix: "require opt-in flag", referenceBot: "ACP_SolanaBot" },
+          { id: "P2", title: "Uncapped hire loop", severity: "Critical", detection: "grep for while-true in hire path", canonicalFix: "add rate limit", referenceBot: "ACP_OracleBot" },
+          { id: "P3", title: "Missing nonce on broadcast", severity: "High", detection: "check message construction", canonicalFix: "add nonce", referenceBot: "ACP_RevokeBot" },
+          { id: "P4", title: "Webhook signing-key reuse", severity: "High", detection: "grep for shared keys", canonicalFix: "per-bot keys", referenceBot: "ACP_OracleBot" },
+          { id: "B1", title: "Bridge relayer nonce gap", severity: "Medium", detection: "check nonce sequence", canonicalFix: "gap-aware nonce mgr", referenceBot: "ACP_ButlerBridge" }
+        ]
+      }));
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  const conn = startServer({ ACP_API_URL: gw.url });
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_security_pattern", arguments: { severity: "Critical" } } });
+    assert.equal(r.result.isError, undefined,
+      `expected success, got error: ${r.result.content?.[0]?.text}`);
+    const parsed = JSON.parse(r.result.content[0].text);
+    assert.equal(parsed.count, 2, `expected 2 Critical patterns, got ${parsed.count}`);
+    assert.equal(parsed.totalInCatalogue, 5);
+    assert.equal(parsed.corpusVersion, "2026-05-30");
+    assert.equal(parsed.filters.severity, "Critical");
+    for (const p of parsed.patterns) {
+      assert.equal(p.severity, "Critical");
+    }
   } finally { conn.close(); await gw.close(); }
 });
