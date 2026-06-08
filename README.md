@@ -12,6 +12,10 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.13.0 (2026-06-07)
+
+**Portfolio expanded to 15 bots** — `acp_portfolio_status` now probes all 15 portfolio bots (was 10). New: SolanaBot, WitnessBot, ButlerBridgeBot, SecurityBot, ConciergeBot. **New tool: `acp_security_pattern`** wraps SecurityBot's free 53-pattern catalogue (P1-P43 + B1-B9) with filter-by-severity, search-by-title, and single-pattern lookup. Cached 5 min. New slash command: `/acp-find:security-pattern`. Tool count 39 → 40; slash count 30 → 31. All additive. 42 tests.
+
 ## What's new in v0.12.1 (2026-05-25)
 
 Surfaces **Metabot v1.10.1's marketplaceGap V1/V2 slice**. One new optional field on `acp_marketplace_gap` (and the underlying `POST /v1/marketplace/gap` endpoint): `marketplace?: "v1" | "v2" | "both"`. **Default flips from `"both"` to `"v2"`** — V2 is the marketplace where new ACP-v2 bots actually deploy, so V2-only is the relevant denominator for the offering's "where should I build?" use case. Pass `marketplace: "both"` to recover the pre-v0.12.1 default. Near-dup edges still cross marketplaces, so the `"both"` numbers are identical to pre-v0.12.1. The `/acp-find:marketplace-gap` slash command parser now accepts BOTH a positional `v1`/`v2`/`both` keyword AND a `marketplace:<value>` named flag (flag wins on conflict). Tool count stays at 39; slash count stays at 30. Forward-compatible against old gateways (they silently ignore the field). 40 tests (unchanged).
