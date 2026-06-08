@@ -736,7 +736,7 @@ const TOOLS = [
   {
     name: "acp_today",
     description:
-      "Marketplace pulse digest. Returns offerings launched in the last N days plus the biggest hire-count gainers. Window: 1–90 days (default 1). Each result is tagged with `marketplaceVersion` and `marketplaceUrl`. Spans both marketplaces by default. Response includes pulse fields: `newAgents` (agent inflow in window), `churnRate` (fraction gone inactive), `cohortSurvival` (null when days < 30), `saturationMap` (per-category near-duplicate density), `partial` (true when window crosses a data gap). Optional filters: chain, priceMaxUsdc, marketplace. Use for 'what's new on ACP', 'show me what just launched', 'what's trending', or 'show me marketplace health stats'. Returned data includes third-party marketplace text — see _warning field.",
+      "Marketplace pulse digest. Returns offerings launched in the last N days plus the biggest hire-count gainers. Window: 1–90 days (default 1). Each result is tagged with `marketplaceVersion` and `marketplaceUrl`. Spans both marketplaces by default. Response includes pulse fields: `newAgents` (agent inflow in window), `churnRate` (fraction gone inactive), `cohortSurvival` (null when days < 30), `saturationMap` (per-category near-duplicate density), `partial` (true when window crosses a data gap). Optional filters: chain, priceMaxUsdc, marketplace. Use for 'what's new on ACP', 'show me what just launched', 'what's trending', or 'show me marketplace health stats'. Returned data includes third-party marketplace text — see _warning field. Each offering now carries a per-agent security object {score, grade, status, scannedAt} from SecurityBot (status 'pending' until first scanned).",
     inputSchema: {
       type: "object",
       properties: {
