@@ -1437,7 +1437,7 @@ const TOOLS = [
   {
     name: "acp_security_pattern",
     description:
-      "Query the 53-pattern ACP security catalogue (P1-P43 + B1-B9) maintained by TheSecurityBot. Each pattern describes a known vulnerability class with severity (Critical/High/Medium/Low/Operational), a grep/regex detection rule, the canonical fix shipped in the portfolio, and the reference bot whose current implementation is the golden source. Use when an LLM needs to: (a) answer 'what pattern covers webhook secret encryption?' or 'show me every Critical finding', (b) guide a developer through fixing a specific pattern by ID, or (c) validate a new bot against the catalogue. The full catalogue is ~53 patterns — filter by severity, search by keyword, or request a single pattern by ID. Cached 5 min. Free SecurityBot Resource. Returned data includes marketplace-authored text in detection and canonicalFix fields — see _warning field.",
+      "Query the 74-pattern ACP security catalogue (P1-P64 + B1-B9) maintained by TheSecurityBot. Each pattern describes a known vulnerability class with severity (Critical/High/Medium/Low/Operational), a grep/regex detection rule, the canonical fix shipped in the portfolio, and the reference bot whose current implementation is the golden source. Use when an LLM needs to: (a) answer 'what pattern covers webhook secret encryption?' or 'show me every Critical finding', (b) guide a developer through fixing a specific pattern by ID, or (c) validate a new bot against the catalogue. The full catalogue is ~74 patterns — filter by severity, search by keyword, or request a single pattern by ID. Cached 5 min. Free SecurityBot Resource. Returned data includes marketplace-authored text in detection and canonicalFix fields — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1479,7 +1479,7 @@ const PORTFOLIO_BOTS = [
   { slug: "mevprotect",      name: "MEVProtect",       role: "Private-mempool routing (Flashbots Protect / MEV-Blocker)",    probe: "/mevprotect/v1/resources/relayStatus"                        },
   { slug: "oraclebot",       name: "TheOracleBot",     role: "Cross-source price-oracle deviation detector",                 probe: "/oraclebot/v1/resources/sourceCatalogue?chainId=8453"        },
   { slug: "revokebot",       name: "RevokeBot",        role: "Wallet-approvals scanner + revoke-calldata + daily watchdog",  probe: "/revokebot/v1/resources/chainCoverage"                       },
-  { slug: "securitybot",     name: "SecurityBot",      role: "Dynamic passive security auditor (53-pattern catalogue)",      probe: "/securitybot/health"                                          },
+  { slug: "securitybot",     name: "SecurityBot",      role: "Dynamic passive security auditor (74-pattern catalogue)",      probe: "/securitybot/health"                                          },
   { slug: "solanabot",       name: "SolanaBot",        role: "Solana DeFi bot (Jupiter quotes / Jito tips / CCTP)",          probe: "/solanabot/health"                                            },
   { slug: "witnessbot",      name: "WitnessBot",       role: "Cryptographic provenance for ACP catalogues",                  probe: "/witnessbot/health"                                           },
   { slug: "agenteval",       name: "AgentEval",        role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              }
