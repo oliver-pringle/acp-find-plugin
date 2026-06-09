@@ -1114,6 +1114,22 @@ const TOOLS = [
     }
   },
 
+  {
+    name: "acp_security_scan",
+    description:
+      "OPERATOR-ONLY. Run TheSecurityBot's full passive security scan against any ACP marketplace bot ON DEMAND (jumps the background worker's queue for one agent). Returns the verdict + score/grade + per-finding detail {patternId, title, severity, verdict, evidence, fixRef} scored against the P1-P64 + B1-B9 catalogue, and persists the result to TheMetaBot's security history. REQUIRES the operator key: set ACP_API_KEY = TheMetaBot's INTERNAL_API_KEY (the gateway returns 401 without it). Free internal path ($0, no ACP escrow). Accepts ANY agent address whether or not it is indexed (SecurityBot resolves the target's public surface). Use to diagnose 'can SecurityBot score this bot?' or to get an actionable fix list for a bot you operate. not_auditable / error are returned honestly (status field), not as a failure.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM agent wallet address (0x + 40 hex). Lower- or mixed-case OK."
+        }
+      },
+      required: ["agentAddress"]
+    }
+  },
+
   // ===== v0.9.1 Risk Bundle + Marketplace Gap + Buyer Verify (8 tools) =====
   // Backs TheMetaBot v1.8 (commit 8b17e35, 2026-05-17 — 4 risk_* offerings)
   // and v1.9 (commit bc26684, 2026-05-18 — marketplaceGap). Plus 2 cached
@@ -2130,6 +2146,28 @@ const HANDLERS = {
       }
     }
     return wrapUntrusted(json);
+  },
+
+  acp_security_scan: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    if (!isHexAddress(args.agentAddress)) {
+      throw new Error("agentAddress must be 0x followed by 40 hex chars");
+    }
+    // Operator-only: the gateway gates /admin/* behind X-API-Key. callGateway
+    // attaches X-API-Key only when ACP_API_KEY is set (SEND_API_KEY). Give a clear
+    // message up front rather than surfacing a bare 401 passthrough.
+    if (!SEND_API_KEY) {
+      throw new Error(
+        "acp_security_scan is operator-only: set ACP_API_KEY to TheMetaBot's INTERNAL_API_KEY to authorise the scan."
+      );
+    }
+    const agentAddress = normalizeAddress(args.agentAddress);
+    const result = await callGateway("/admin/securityScan", { agentAddress }, "POST");
+    // Decorate with the marketplace hire link, consistent with the other tools.
+    if (result && typeof result === "object" && !result.marketplaceUrl) {
+      result.marketplaceUrl = agentUrl(agentAddress);
+    }
+    return result;
   },
 
   // ===== v0.9.1 Risk Bundle + Marketplace Gap + Buyer Verify =====
