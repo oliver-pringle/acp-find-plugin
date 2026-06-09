@@ -12,6 +12,10 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.14.0 (2026-06-09)
+
+**On-demand security scanning + scan history.** Two new tools, surfacing SecurityBot's catalogue (now **74 patterns**, P1-P64 + B1-B9, after the 2026-06-08 audit). **New tool: `acp_agent_security_history`** — a bot's past scans, newest first, SUMMARY only (raw findings stay server-side, P9/P10); public, backed by the new `GET /v1/securityScanHistory` gateway endpoint. **New tool: `acp_security_scan`** — operator-only on-demand full scan (verdict + score/grade + per-finding `findings[]`), requires `ACP_API_KEY` = TheMetaBot's `INTERNAL_API_KEY`. New slash commands: `/acp-find:security-scan`, `/acp-find:security-history`. Tool count 40 → 42; slash count 31 → 33. All additive. 44 tests.
+
 ## What's new in v0.13.0 (2026-06-07)
 
 **Portfolio expanded to 15 bots** — `acp_portfolio_status` now probes all 15 portfolio bots (was 10). New: SolanaBot, WitnessBot, ButlerBridgeBot, SecurityBot, ConciergeBot. **New tool: `acp_security_pattern`** wraps SecurityBot's free 53-pattern catalogue (P1-P43 + B1-B9) with filter-by-severity, search-by-title, and single-pattern lookup. Cached 5 min. New slash command: `/acp-find:security-pattern`. Tool count 39 → 40; slash count 30 → 31. All additive. 42 tests.

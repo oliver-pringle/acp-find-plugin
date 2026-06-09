@@ -11,6 +11,35 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.14.0
+
+**42 tools, 33 slash commands.** On-demand security scanning + scan history, surfacing
+SecurityBot's **74-pattern** catalogue (P1-P64 + B1-B9). All additive — no existing
+signatures change.
+
+- **`acp_agent_security_history`** — NEW tool. A bot's past SecurityBot scans, newest
+  first (the append-only history behind `acp_today`'s per-offering `security` field).
+  Each row is a SUMMARY — `{ scannedAt, status, score, grade, verdict, findingCount,
+  observableCount, corpusVersion, severityCounts }`. Raw per-finding detail is
+  intentionally NOT returned here (it stays server-side, P9/P10); empty (`count: 0`) for
+  a bot never scanned. **Public, no API key.** Use it to see whether a bot's security
+  posture is improving or regressing before you hire it. Backed by the new public
+  `GET /v1/securityScanHistory` gateway endpoint.
+
+- **`acp_security_scan`** — NEW **operator-only** tool. Runs SecurityBot's full passive
+  scan against any ACP marketplace bot **on demand** (jumps the background worker's
+  queue), returns the verdict + score/grade + the full per-finding `findings[]`, and
+  persists the result to TheMetaBot's history. Requires `ACP_API_KEY` = TheMetaBot's
+  `INTERNAL_API_KEY` (the tool refuses, and the gateway returns 401, without it). Free
+  internal path — no ACP escrow.
+
+- **`acp_security_pattern` catalogue now 74** — the wrapped SecurityBot catalogue grew
+  from 53 (P1-P43) to **74 (P1-P64 + B1-B9)** after the 2026-06-08 portfolio audit. The
+  tool description reflects this; the data was already live on the gateway.
+
+- **New slash commands:** `/acp-find:security-scan <address>` (operator) and
+  `/acp-find:security-history <address> [limit:N]`.
+
 ## What's new in v0.13.0
 
 **40 tools, 31 slash commands, 15-bot portfolio snapshot.**
@@ -184,7 +213,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (37)
+## Tools (42)
 
 ### Search & discovery
 
@@ -193,6 +222,7 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 | `acp_find` | `query`, `limit?`, `offset?`, `priceMaxUsdc?`, `includeStale?`, `category?`, `chain?`, `minReputation?`, `freshness?`, `marketplace?` | Ranked offerings + a `confidence` bucket and `bestMatch` flag when top score ≥ 0.7. Each result carries `marketplaceVersion` (`v1` / `v2`), `marketplaceUrl`, **`saturation`** (`nearDuplicateCount`, `categorySize`), and **`pricePercentile`** (`value`, `peerN`, `lowN`). Hybrid BM25 + dense fusion. Hides offerings with no hires in 90d by default. `offset` paginates beyond the top 50. |
 | `acp_search_agents` | `query`, `limit?`, `marketplace?` | Agent-level hybrid search (BM25 + dense + Voyage rerank). Response key is `agents`. Each agent gains **`marketplaces`** (array), **`dominantMarketplace`**, **`agentScore`** (post-rerank cosine, higher = better), **`topOfferings`** (records: `offeringName`, `priceUsdc`, `marketplaceVersion`), **`topOfferingNames`** (names-only mirror). |
 | `acp_compose_stack` | `useCase`, `budgetUsdc?`, `maxOfferings?`, `chain?`, `marketplace?` | Curated multi-agent stack with rationale. |
+| `acp_search_narrative` (v0.12.0) | `query`, `previousQueries?`, `marketplace?` | Claude-narrated search — ranked offerings plus a natural-language narrative of the result set. Wraps TheMetaBot v1.10 Phase 3 `searchNarrative`. Response wrapped with `_warning` + `_untrusted` (marketplace-authored text). |
 
 ### Agent / offering deep-dive
 
@@ -265,6 +295,7 @@ Wraps TheMetaBot v1.8 portfolio-risk pipeline + v1.9 marketplace pack. Risk endp
 | `acp_risk_sources` | — | Per-source health (`fresh`/`stale`/`unavailable`) for LiquidGuard, RevokeBot, MEVProtect, and TheMetaBot's reputation lane, plus an overall `verdict` (`FRESH` / `DEGRADED` / `UNAVAILABLE`). Cached 5 min. Free Metabot Resource. |
 | `acp_risk_rubric` | — | Methodology behind the score: weights per component, grade bands (A=85+ / B=70+ / C=55+ / D=40+ / F), bucket tables. Cached 5 min. Free Metabot Resource. |
 | `acp_agent_verify` ⭐ | `walletAddress`, `chain?`, `depth?` (`lite`/`full`, default `full`) | **Composite pre-hire safety check.** Runs reputation + arena + recentJobs + risk_snapshot in parallel and synthesises a rule-based verdict (`STRONG_BUY` / `OK` / `CAUTION` / `AVOID` / `UNKNOWN`) + headline. `depth: 'lite'` skips recentJobs (3 sub-calls instead of 4). Errors in any sub-call surface as `{ error }` inside that dimension; partial verdicts are explicitly allowed. |
+| `acp_agent_risk_check` (v0.12.0) | `agentAddress` | ACP-seller risk score for a specific agent (wraps TheMetaBot v1.10 Phase 3 `agentRiskCheck`, $0.05 on the marketplace; free pass-through here). Response wrapped with `_warning` + `_untrusted`. |
 
 ### OracleBot Resources (v0.10.0)
 
@@ -285,6 +316,16 @@ Composite tools that orchestrate v0.9.1's primitives + `acp_compose_stack` at sc
 | `acp_hire_decision` ⭐ | `useCase`, `budgetUsdc?`, `chain?`, `maxOfferings?` | One envelope: `{ stack, ranking[], recommendation, totalCostUsdc, checkedAt }`. Sub-call count: 1 (composeStack) + N unique agents (reputation). Typically 4-7 calls. Composite score = 0.7 × reputation + 0.3 × inverse-price. |
 | `acp_safe_quote` ⭐ | `agentAddress`, `offeringName`, `chain?` | Merged envelope `{ offering, verdict, headline, reputation, arena, risk, marketplaceUrl, checkedAt }`. Runs `acp_offering` + `acp_agent_verify(depth: lite)` in parallel. 4 round trips total. |
 | `acp_portfolio_status` ⭐ | — | `{ count: 10, healthyCount, bots: [{ name, slug, role, reachable, latencyMs, error?, sampleExcerpt }] }`. Probes all 10 portfolio bots in parallel via known-reachable Resources. Bot list hardcoded in PORTFOLIO_BOTS. |
+
+### Security (v0.13.0 / v0.14.0)
+
+SecurityBot's deterministic passive auditor, surfaced via TheMetaBot. The catalogue is **74 patterns** (P1-P64 + B1-B9) as of the 2026-06-08 portfolio audit.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_security_pattern` | `patternId?`, `severity?`, `query?` | The 74-pattern catalogue (P1-P64 + B1-B9): per-pattern severity, detection rule, canonical fix, reference bot. Filter by severity / keyword / id. Cached 5 min. Free SecurityBot Resource — no API key. |
+| `acp_agent_security_history` | `agentAddress`, `limit?` (1-100, default 20) | A bot's past scans, newest first — SUMMARY rows `{ scannedAt, status, score, grade, verdict, findingCount, observableCount, corpusVersion, severityCounts }`. Raw findings stay server-side (P9/P10). `count: 0` when never scanned. **Public**, no API key. |
+| `acp_security_scan` 🔑 | `agentAddress` | **Operator-only.** On-demand full SecurityBot scan of any bot (jumps the worker queue); returns verdict + score/grade + full per-finding `findings[]`, and persists to history. Requires `ACP_API_KEY` = TheMetaBot's `INTERNAL_API_KEY`. Free internal path. |
 
 ### Operations
 

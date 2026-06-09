@@ -91,6 +91,7 @@ const EXPECTED_TOOLS = [
   "acp_agent_reputation_history",
   "acp_agent_resources",
   "acp_agent_risk_check",
+  "acp_agent_security_history",
   "acp_agent_verify",
   "acp_arena_check",
   "acp_arena_council_picks",
@@ -123,6 +124,7 @@ const EXPECTED_TOOLS = [
   "acp_search_agents",
   "acp_search_narrative",
   "acp_security_pattern",
+  "acp_security_scan",
   "acp_today",
   "acp_watch_status"
 ];
@@ -150,7 +152,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 40 tools with required schemas", async () => {
+test("tools/list returns all 42 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -307,6 +309,74 @@ test("acp_agent_feed_address validates address shape", async () => {
     });
     assert.equal(r2.result.isError, true);
     assert.match(r2.result.content[0].text, /0x followed by 40 hex chars/);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_security_scan validates address and requires the operator key", async () => {
+  // Force ACP_API_KEY empty so the operator-gating branch fires deterministically,
+  // independent of whatever the test runner's environment happens to hold.
+  const conn = startServer({ ACP_API_KEY: "" });
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const noAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_security_scan", arguments: {} }
+    });
+    assert.equal(noAddr.result.isError, true);
+    assert.match(noAddr.result.content[0].text, /agentAddress is required/);
+
+    const badAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "acp_security_scan", arguments: { agentAddress: "0xnotahex" } }
+    });
+    assert.equal(badAddr.result.isError, true);
+    assert.match(badAddr.result.content[0].text, /0x followed by 40 hex chars/);
+
+    // Valid address but no operator key -> clear operator-only message, no gateway call.
+    const noKey = await conn.rpc({
+      jsonrpc: "2.0", id: 4, method: "tools/call",
+      params: { name: "acp_security_scan", arguments: { agentAddress: "0x" + "1".repeat(40) } }
+    });
+    assert.equal(noKey.result.isError, true);
+    assert.match(noKey.result.content[0].text, /operator-only/);
+  } finally {
+    conn.close();
+  }
+});
+
+test("acp_agent_security_history validates address and exposes limit 1..100 schema", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const noAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "acp_agent_security_history", arguments: {} }
+    });
+    assert.equal(noAddr.result.isError, true);
+    assert.match(noAddr.result.content[0].text, /agentAddress is required/);
+
+    const badAddr = await conn.rpc({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "acp_agent_security_history", arguments: { agentAddress: "0xnotahex" } }
+    });
+    assert.equal(badAddr.result.isError, true);
+    assert.match(badAddr.result.content[0].text, /Invalid wallet address|0x followed by 40 hex chars/);
+
+    // Schema: limit is an optional number clamped 1..100.
+    const list = await conn.rpc({ jsonrpc: "2.0", id: 4, method: "tools/list" });
+    const tool = list.result.tools.find(t => t.name === "acp_agent_security_history");
+    assert.ok(tool, "acp_agent_security_history present in tools/list");
+    assert.equal(tool.inputSchema.properties.limit.minimum, 1);
+    assert.equal(tool.inputSchema.properties.limit.maximum, 100);
+    assert.deepEqual(tool.inputSchema.required, ["agentAddress"]);
   } finally {
     conn.close();
   }

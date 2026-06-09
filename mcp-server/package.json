@@ -1,7 +1,7 @@
 {
   "name": "acp-find-mcp",
-  "version": "0.13.0",
-  "description": "MCP server for searching the Virtuals Protocol ACP marketplace + Degen Arena + portfolio risk scoring + cross-portfolio composition. Exposes 40 tools — v0.13.0 adds acp_security_pattern (53-pattern SecurityBot catalogue) and expands portfolio to 15 bots. v0.12.1 added marketplace slice ({v1,v2,both}; default flipped to 'v2') to acp_marketplace_gap. Previous releases: v0.12.0 paid Phase 3 offerings (acp_search_narrative, acp_agent_risk_check), v0.10.0 composites (acp_hire_decision, acp_safe_quote, acp_portfolio_status), OracleBot Resource wrappers, v0.9.1 risk bundle, Degen Arena tools, and the v0.7+ Resources / cost / feed-address suite — backed by the public api.acp-metabot.dev gateway. Works in Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop.",
+  "version": "0.14.0",
+  "description": "MCP server for searching the Virtuals Protocol ACP marketplace + Degen Arena + portfolio risk scoring + security scanning + cross-portfolio composition. Exposes 42 tools — v0.14.0 adds acp_security_scan (operator-only on-demand SecurityBot scan) + acp_agent_security_history (a bot's past scan results, summary only) over SecurityBot's 74-pattern catalogue (P1-P64 + B1-B9). v0.13.0 added acp_security_pattern and expanded the portfolio snapshot to 15 bots. v0.12.1 added a marketplace slice ({v1,v2,both}; default 'v2') to acp_marketplace_gap. Previous releases: v0.12.0 paid Phase 3 offerings (acp_search_narrative, acp_agent_risk_check), v0.10.0 composites (acp_hire_decision, acp_safe_quote, acp_portfolio_status), OracleBot Resource wrappers, v0.9.1 risk bundle, Degen Arena tools, and the v0.7+ Resources / cost / feed-address suite — backed by the public api.acp-metabot.dev gateway. Works in Cursor, Cline, Windsurf, Codex, Continue, Claude Code, and Claude Desktop.",
   "type": "module",
   "main": "server.js",
   "bin": {

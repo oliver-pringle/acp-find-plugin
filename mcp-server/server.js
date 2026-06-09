@@ -1130,6 +1130,28 @@ const TOOLS = [
     }
   },
 
+  {
+    name: "acp_agent_security_history",
+    description:
+      "Past SecurityBot scan results for an ACP agent, newest first (the append-only history behind acp_today's per-offering `security` field). Each row is a SUMMARY: { scannedAt, status, score, grade, verdict, findingCount, observableCount, corpusVersion, severityCounts }. status is scanned | not_auditable | error. Raw per-finding detail is intentionally NOT returned here (it stays server-side); use the operator-only acp_security_scan for a fresh scan that includes the full findings[]. Public, no API key. Empty history (count 0) for an agent that has never been scanned. Use to see whether a bot's security posture is improving or regressing over time before hiring it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: {
+          type: "string",
+          description: "EVM wallet address of the agent (0x-prefixed). Lower- or mixed-case is fine."
+        },
+        limit: {
+          type: "number",
+          description: "How many of the most recent scans to return (1-100). Default 20.",
+          minimum: 1,
+          maximum: 100
+        }
+      },
+      required: ["agentAddress"]
+    }
+  },
+
   // ===== v0.9.1 Risk Bundle + Marketplace Gap + Buyer Verify (8 tools) =====
   // Backs TheMetaBot v1.8 (commit 8b17e35, 2026-05-17 — 4 risk_* offerings)
   // and v1.9 (commit bc26684, 2026-05-18 — marketplaceGap). Plus 2 cached
@@ -2167,6 +2189,22 @@ const HANDLERS = {
     if (result && typeof result === "object" && !result.marketplaceUrl) {
       result.marketplaceUrl = agentUrl(agentAddress);
     }
+    return result;
+  },
+
+  acp_agent_security_history: async (args) => {
+    if (!args?.agentAddress) throw new Error("agentAddress is required");
+    const addr = normalizeAddress(args.agentAddress);
+    // limit is optional; clamp to 1..100 here so a bad value never reaches the gateway.
+    let limit = typeof args.limit === "number" ? Math.floor(args.limit) : 20;
+    if (limit < 1) limit = 1;
+    if (limit > 100) limit = 100;
+    const result = await callGateway(
+      `/v1/securityScanHistory?agent=${encodeURIComponent(addr)}&limit=${encodeURIComponent(limit)}`,
+      undefined,
+      "GET"
+    );
+    if (result && typeof result === "object") result.marketplaceUrl = agentUrl(addr);
     return result;
   },
 

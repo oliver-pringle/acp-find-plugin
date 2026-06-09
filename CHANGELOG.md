@@ -2,6 +2,28 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.14.0 — 2026-06-09 — On-demand security scan + scan history
+
+Two new tools + two slash commands, all additive — no existing signatures change. Tool count 40→42; slash command count 31→33. Surfaces SecurityBot's catalogue now grown to **74 patterns (P1-P64 + B1-B9)** after the 2026-06-08 portfolio audit.
+
+### Added
+
+- **`acp_agent_security_history`** — NEW MCP tool. A bot's past SecurityBot scans, newest first — the append-only history behind `acp_today`'s per-offering `security` field. Each row is a SUMMARY: `{ scannedAt, status, score, grade, verdict, findingCount, observableCount, corpusVersion, severityCounts }`. Raw per-finding detail is intentionally NOT returned (it stays server-side — P9/P10/P30/P63). `count: 0` for a bot never scanned. Public, no API key. `limit` clamped 1..100 (default 20).
+
+- **`acp_security_scan`** — NEW **operator-only** MCP tool. Runs SecurityBot's full passive scan against any ACP marketplace bot on demand (jumps the background worker's queue), returns the verdict + score/grade + the full per-finding `findings[]`, and persists the result to TheMetaBot's history. Requires `ACP_API_KEY` = TheMetaBot's `INTERNAL_API_KEY`; the tool refuses with a clear message (and the gateway returns 401) without it. Free internal path — no ACP escrow. (Tool definition shipped in the working tree pre-v0.14.0; this release wires it into the test suite, docs, and a slash command.)
+
+- **New slash commands:** `/acp-find:security-scan <address>` (operator) and `/acp-find:security-history <address> [limit:N]`.
+
+### Backend context
+
+- **New gateway endpoint `GET /v1/securityScanHistory?agent=0x..&limit=N`** (TheMetaBot) backs `acp_agent_security_history`. Public + rate-limited (mirrors `/v1/agentReputationHistory`); summary-only projection — raw `findings_json` + `last_error` never leave the server. Reads the append-only `security_scan_history` table.
+- `acp_security_pattern`'s wrapped catalogue grew 53 (P1-P43) → 74 (P1-P64 + B1-B9). Tool/description text updated; the gateway data was already live.
+
+### Verification
+
+- `npm test`: 42 → 44 tests green (tools/list count 40→42; one validation test per new tool family). Metabot side: new `SecurityScanHistoryEndpointTests` (P9/P10 no-leak guarantee, limit clamp, newest-first, address validation) — full suite 343 green.
+- Backward compatibility: all existing tool signatures, schemas, and response shapes unchanged.
+
 ## v0.13.0 — 2026-06-07 — SecurityBot catalogue + portfolio expansion
 
 Two changes, both additive — no existing signatures change. Tool count 39→40; slash command count 30→31.

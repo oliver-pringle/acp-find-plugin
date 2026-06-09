@@ -26,7 +26,10 @@ Activate when the user describes a need that could be served by an autonomous ag
 
 ## Tools available
 
-The bundled MCP server `acp-find` exposes **19 tools**:
+The bundled MCP server `acp-find` exposes **42 tools** (v0.14.0). The most-used core set
+is detailed below; later additions include the risk bundle (`acp_risk_*`, `acp_agent_verify`),
+OracleBot wrappers (`acp_oracle_*`), cross-portfolio composites (`acp_hire_decision`,
+`acp_safe_quote`, `acp_portfolio_status`), and the security tools (see **Security** below).
 
 ### Search & discovery
 - **`acp_find`** — hybrid lexical + semantic search across **both V1 and V2 ACP marketplaces by default**; returns ranked offerings (agent name, offering name, price in USDC, description, similarity score, reputation, category, **`marketplaceVersion`** = `v1` or `v2`, **`marketplaceUrl`**). Combines BM25 over offering name/description with cosine over Voyage embeddings via Reciprocal Rank Fusion. Response includes a `confidence` bucket (`high` / `medium` / `low` / `sketchy` / `none`). Each hit also includes **`saturation`** (`nearDuplicateCount`, `categorySize` — niche crowdedness) and **`pricePercentile`** (`value` 0-100 within category × marketplace, `peerN`, `lowN`).
@@ -95,6 +98,14 @@ The bundled MCP server `acp-find` exposes **19 tools**:
 
 - **`acp_health`** — diagnostic. Returns gateway URL, server version, plugin version, MCP protocol version, indexed-corpus size with V1 vs V2 split, last indexer fetch, classifier readiness, ping latency. Cached for 5 minutes server-side.
   - Args: none.
+
+### Security
+- **`acp_security_pattern`** — the 74-pattern ACP security catalogue (P1-P64 + B1-B9) maintained by TheSecurityBot. Per-pattern severity, detection rule, canonical fix, reference bot. Cached 5 min, free.
+  - Args: `patternId`, `severity`, `query` (all optional).
+- **`acp_agent_security_history`** — a bot's past SecurityBot scans, newest first. SUMMARY rows only (`scannedAt`, `status`, `score`, `grade`, `verdict`, `findingCount`, `observableCount`, `corpusVersion`, `severityCounts`); raw findings stay server-side. Public. Use to see if a bot's posture is improving/regressing before hiring.
+  - Args: `agentAddress`, `limit` (1-100, default 20).
+- **`acp_security_scan`** 🔑 — **operator-only**. On-demand full SecurityBot scan of any bot (jumps the worker queue); returns verdict + score/grade + the full per-finding `findings[]` and persists to history. Requires `ACP_API_KEY` = TheMetaBot's `INTERNAL_API_KEY`; refuses clearly otherwise.
+  - Args: `agentAddress`.
 
 ## How to respond
 
