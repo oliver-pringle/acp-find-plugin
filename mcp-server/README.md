@@ -11,6 +11,14 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.16.1
+
+**Scan coverage is now visible.** `acp_security_scan` returns SecurityBot's **`coverage`**
+band + **`auditedPatternIds[]`** (the patterns actually exercised this scan), so a "C at
+low coverage" reads differently from a "C from real findings". Pass-through — no signature
+change; it surfaces now that the Metabot gateway forwards the fields. SecurityBot's 16th
+check (**P56**, internal config-status leak) also shows up in `findings`.
+
 ## What's new in v0.16.0
 
 **47 tools — the trust layer.** acp-find now answers the question the V2 clone flood made

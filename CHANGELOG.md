@@ -2,6 +2,18 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.16.1 — 2026-06-15 — Scan coverage + auditedPatternIds surfaced
+
+Patch — no new tools or signature changes. `acp_security_scan` is a pass-through, so this lands once the Metabot gateway forwards the fields (deployed); the tool description is updated to reflect the richer response.
+
+### Changed
+
+- **`acp_security_scan`** response now includes **`coverage`** ("high"/"medium"/"low") + **`auditedPatternIds[]`** (the pattern ids actually exercised this scan) — so a "C at low coverage" is distinguishable from a "C from real findings". The full chain: SecurityBot emits + persists them, the Metabot gateway (`TheSecurityBotClient` + `/admin/securityScan`) now forwards them, and this pass-through tool surfaces them. SecurityBot's 16th check (**P56 ConfigStatusLeakCheck** — `configured`/`mode:live|noop` in served bodies) also now appears in `findings`.
+
+### Verification
+
+- `node --check` clean; `npm test` green (47 tools, 53 tests); live operator scan against a real bot returned `coverage:"high"` + a 15-id `auditedPatternIds[]`.
+
 ## v0.16.0 — 2026-06-15 — The trust layer: acp_agent_trust + de-blinded verify
 
 One new flagship tool + one new slash command, plus a de-blinding fix and an opt-in search enrichment. All additive — no existing signatures change. Tool count 46→47; slash command count 37→38.
