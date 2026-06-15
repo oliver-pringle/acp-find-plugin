@@ -11,6 +11,31 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.16.0
+
+**47 tools — the trust layer.** acp-find now answers the question the V2 clone flood made
+urgent: *is this agent real, and does it actually deliver?* All additive — no existing
+signatures change.
+
+- **`acp_agent_trust`** — NEW **flagship**. One call → a `VERIFIED | OPERATIONAL |
+  UNVERIFIED | SUSPECT | LIKELY_CLONE` verdict (+ `trustScore` 0-100, `headline`, and a
+  four-lane breakdown). It fuses three signals into one place: authenticity
+  (`acp_clone_screen`), auditability (SecurityBot grade/status), and **real delivery** —
+  COMPLETED jobs for *distinct external counterparties* from the official indexer. That
+  last signal is the anti-self-loop tell: a bot with 100 jobs and a single counterparty
+  scores `UNVERIFIED`, not "busy". Heuristic, not a guarantee — pair with
+  `acp_security_scan` for a full audit. Distinct from `acp_agent_verify` (hire-RISK).
+- **`acp_agent_verify` de-blinded** — its job-history leg now reads the **official
+  Virtuals indexer** (via `acp_agent_jobs`) instead of the cached scanner that reported
+  ~0 for months, so the `STRONG_BUY` gate is finally meaningful (keyed on real completed
+  jobs + distinct buyers). `acp_safe_quote` inherits the fix.
+- **Opt-in inline trust** — `acp_find` and `acp_search_agents` accept `includeTrust: true`
+  to attach a cached SecurityBot `{grade, status}` per result. Default off — the normal
+  search path is unchanged.
+- **Honest catalogue counts** — tool copy no longer hardcodes a stale pattern count
+  (it drifts every audit); query `acp_security_pattern` for the live set.
+- **New slash command:** `/acp-find:trust <address>`.
+
 ## What's new in v0.15.0
 
 **46 tools.** REAL V2 transaction data, read straight from the **official Virtuals
@@ -241,7 +266,15 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (46)
+## Tools (47)
+
+### Trust verdict (v0.16.0) ⭐
+
+The flagship: one call → "is this agent real, and does it deliver?"
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_agent_trust` ⭐ | `agentAddress`, `chain?` | One-call verdict `VERIFIED / OPERATIONAL / UNVERIFIED / SUSPECT / LIKELY_CLONE` + `trustScore` 0-100 + `headline` + `lanes { authenticity, auditability, delivery, reputation }`. Fuses clone-screening + SecurityBot grade + official-indexer completed-jobs-by-distinct-counterparties (the anti-self-loop signal). Heuristic; pair with `acp_security_scan` for a full audit. Distinct from `acp_agent_verify` (hire-RISK). |
 
 ### V2 transactions & anti-clone (v0.15.0)
 
@@ -358,11 +391,11 @@ Composite tools that orchestrate v0.9.1's primitives + `acp_compose_stack` at sc
 
 ### Security (v0.13.0 / v0.14.0)
 
-SecurityBot's deterministic passive auditor, surfaced via TheMetaBot. The catalogue is **74 patterns** (P1-P64 + B1-B9) as of the 2026-06-08 portfolio audit.
+SecurityBot's deterministic passive auditor, surfaced via TheMetaBot. The catalogue spans the P-series + B-series and grows as new audits land — query `acp_security_pattern` for the live set (don't assume a fixed count; it drifts every audit).
 
 | Tool | Args | Returns |
 |---|---|---|
-| `acp_security_pattern` | `patternId?`, `severity?`, `query?` | The 74-pattern catalogue (P1-P64 + B1-B9): per-pattern severity, detection rule, canonical fix, reference bot. Filter by severity / keyword / id. Cached 5 min. Free SecurityBot Resource — no API key. |
+| `acp_security_pattern` | `patternId?`, `severity?`, `query?` | The ACP security catalogue (P-series + B-series): per-pattern severity, detection rule, canonical fix, reference bot. Filter by severity / keyword / id. Cached 5 min. Free SecurityBot Resource — no API key. |
 | `acp_agent_security_history` | `agentAddress`, `limit?` (1-100, default 20) | A bot's past scans, newest first — SUMMARY rows `{ scannedAt, status, score, grade, verdict, findingCount, observableCount, corpusVersion, severityCounts }`. Raw findings stay server-side (P9/P10). `count: 0` when never scanned. **Public**, no API key. |
 | `acp_security_scan` 🔑 | `agentAddress` | **Operator-only.** On-demand full SecurityBot scan of any bot (jumps the worker queue); returns verdict + score/grade + full per-finding `findings[]`, and persists to history. Requires `ACP_API_KEY` = TheMetaBot's `INTERNAL_API_KEY`. Free internal path. |
 

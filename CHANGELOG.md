@@ -2,6 +2,28 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.16.0 — 2026-06-15 — The trust layer: acp_agent_trust + de-blinded verify
+
+One new flagship tool + one new slash command, plus a de-blinding fix and an opt-in search enrichment. All additive — no existing signatures change. Tool count 46→47; slash command count 37→38.
+
+### Added — MCP tools
+
+- **`acp_agent_trust`** — FLAGSHIP. One-call authenticity/trust verdict for an ACP agent: `VERIFIED | OPERATIONAL | UNVERIFIED | SUSPECT | LIKELY_CLONE` + `trustScore` (0-100) + `headline` + `lanes { authenticity, auditability, delivery, reputation }`. A client-side composite (no new gateway endpoint) fusing `acp_clone_screen` (authenticity), `acp_agent_security_history` (auditability), and official-indexer COMPLETED-jobs-by-distinct-external-counterparties (the anti-self-loop delivery signal — a 100-job/1-counterparty self-loop scores `UNVERIFIED`, not "busy"). Pure verdict/score logic is unit-tested (`computeTrustVerdict`). Heuristic — pairs with `acp_security_scan` for a full audit. Distinct from `acp_agent_verify` (hire-RISK).
+
+### Added — slash commands
+
+- `/acp-find:trust <address>`.
+
+### Changed
+
+- **`acp_agent_verify` de-blinded** — the `depth: full` job-history leg now reads the official Virtuals indexer (`acp_agent_jobs`) instead of the blind `/v1/agentRecentJobs` (ChainEventScanner) that reported ~0 for months. The `STRONG_BUY` gate is now keyed on real completed jobs (threshold lowered 10→3 to match real-completion scarcity) and the headline surfaces distinct buyers. `acp_safe_quote` inherits the fix. The `recentJobs` response field now carries the official-indexer rollup `{asProvider, asClient}` (a new `jobs` field mirrors it); the old blind `{count, jobs[]}` shape is retired — it was always ~0.
+- **`acp_find` / `acp_search_agents`** gain an opt-in `includeTrust` boolean (default false): enriches results with a cached SecurityBot `{grade, status}` hint, so trust shows at discovery time. Default-off keeps the search path latency unchanged.
+- **Stale pattern-count copy de-hardcoded** — tool descriptions + the SecurityBot portfolio role string no longer claim "P1-P64 + B1-B9 / 74 / 81 patterns" (the count drifts every audit; the live catalogue is larger). Query `acp_security_pattern` for the live set.
+
+### Verification
+
+- `node --check` clean; `npm test` green (53 tests, incl. the 47-tool list assertion + the `computeTrustVerdict` cascade-tier unit tests); live smoke (`smoke-v0.16.0.mjs`) against the real gateway + indexer.
+
 ## v0.15.0 — 2026-06-15 — Real V2 transactions from the official indexer
 
 Four new tools + four slash commands, all additive — no existing signatures change. Tool count 42→46; slash command count 33→37. Reads the canonical on-chain job record straight from the **official Virtuals indexer** (`api.acp.virtuals.io` — the data behind `app.virtuals.io/acp/scan/transactions`), because TheMetaBot's homegrown ChainEventScanner has historically been blind to completed jobs.

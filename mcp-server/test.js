@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { computeTrustVerdict, computeTrustScore, latestSecurityRow } from "./server.js";
 
 // Spin up a one-shot HTTP stub gateway. Returns { url, close, requestLog }.
 // Hands `responder(req, res)` every request so each test programs its own behaviour.
@@ -93,6 +94,7 @@ const EXPECTED_TOOLS = [
   "acp_agent_resources",
   "acp_agent_risk_check",
   "acp_agent_security_history",
+  "acp_agent_trust",
   "acp_agent_verify",
   "acp_arena_check",
   "acp_arena_council_picks",
@@ -156,7 +158,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 46 tools with required schemas", async () => {
+test("tools/list returns all 47 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -170,6 +172,67 @@ test("tools/list returns all 46 tools with required schemas", async () => {
       assert.ok(tool.description?.length > 10, `${tool.name} needs a description`);
       assert.equal(tool.inputSchema.type, "object", `${tool.name} schema must be object`);
     }
+  } finally {
+    conn.close();
+  }
+});
+
+// ===== v0.16.0 — acp_agent_trust verdict cascade (pure, offline) =====
+
+test("computeTrustVerdict — LIKELY_CLONE is dispositive", () => {
+  const r = computeTrustVerdict({ clone: { verdict: "LIKELY_CLONE", externalCompleted: 0 }, security: { status: "not_auditable" }, reputation: {} });
+  assert.equal(r.verdict, "LIKELY_CLONE");
+});
+
+test("computeTrustVerdict — SUSPECT when clone screen is suspicious", () => {
+  const r = computeTrustVerdict({ clone: { verdict: "SUSPICIOUS", externalCompleted: 0 }, security: { status: "scanned", score: 90 }, reputation: {} });
+  assert.equal(r.verdict, "SUSPECT");
+});
+
+test("computeTrustVerdict — UNVERIFIED when not auditable and no external delivery", () => {
+  const r = computeTrustVerdict({ clone: { verdict: "CLEAN", externalCompleted: 0 }, security: { status: "not_auditable" }, reputation: {} });
+  assert.equal(r.verdict, "UNVERIFIED");
+});
+
+test("computeTrustVerdict — VERIFIED when auditable, clean, and externally delivering", () => {
+  const r = computeTrustVerdict({ clone: { verdict: "CLEAN", externalCompleted: 2 }, security: { status: "scanned", score: 80 }, reputation: { agentScore: 50 } });
+  assert.equal(r.verdict, "VERIFIED");
+  assert.ok(r.score > 50, `expected score > 50, got ${r.score}`);
+});
+
+test("computeTrustVerdict — OPERATIONAL when auditable+clean but no proven external delivery", () => {
+  const r = computeTrustVerdict({ clone: { verdict: "CLEAN", externalCompleted: 0 }, security: { status: "scanned", score: 80 }, reputation: {} });
+  assert.equal(r.verdict, "OPERATIONAL");
+});
+
+test("computeTrustVerdict — degrades gracefully with empty lanes (never throws)", () => {
+  const r = computeTrustVerdict({ clone: {}, security: {}, reputation: {} });
+  assert.equal(r.verdict, "UNVERIFIED");
+  assert.ok(r.score >= 0 && r.score <= 100);
+});
+
+test("computeTrustScore — clamps to [0,100]", () => {
+  const hi = computeTrustScore({ clone: { verdict: "CLEAN", externalCompleted: 5 }, security: { status: "scanned", score: 100 }, reputation: { agentScore: 100 } });
+  const lo = computeTrustScore({ clone: { verdict: "LIKELY_CLONE" }, security: { status: "not_auditable" }, reputation: {} });
+  assert.ok(hi <= 100, `hi=${hi}`);
+  assert.ok(lo >= 0, `lo=${lo}`);
+});
+
+test("latestSecurityRow — tolerates history/scans/bare-array/inlined/null shapes", () => {
+  assert.equal(latestSecurityRow({ history: [{ grade: "A" }, { grade: "B" }] }).grade, "A");
+  assert.equal(latestSecurityRow({ scans: [{ status: "scanned" }] }).status, "scanned");
+  assert.equal(latestSecurityRow([{ grade: "C" }]).grade, "C");
+  assert.equal(latestSecurityRow({ status: "not_auditable" }).status, "not_auditable");
+  assert.equal(latestSecurityRow(null), null);
+});
+
+test("acp_agent_trust requires a valid agentAddress", async () => {
+  const conn = startServer();
+  try {
+    await conn.rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } } });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "acp_agent_trust", arguments: {} } });
+    assert.equal(r.result.isError, true);
+    assert.match(r.result.content[0].text, /Invalid wallet address|required|40 hex/i);
   } finally {
     conn.close();
   }

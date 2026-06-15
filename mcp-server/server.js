@@ -14,7 +14,7 @@
 
 import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIPv4, isIPv6 } from "node:net";
@@ -218,6 +218,35 @@ function addConfidence(result) {
     top >= 0.35 ? "low" : "sketchy";
 }
 
+// v0.16.0 — opt-in inline trust enrichment for search results. Attaches a
+// cached SecurityBot {grade,status} per result agent so trust shows at
+// discovery time. Bounded (≤ maxAgents unique addresses), parallel, fail-soft;
+// default-off so the normal search path keeps its latency. Mutates rows in place.
+async function enrichWithTrust(rows, maxAgents = 10) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const addrs = [...new Set(
+    rows.map((r) => (typeof r?.agentAddress === "string" ? r.agentAddress.toLowerCase() : null)).filter(Boolean)
+  )].slice(0, maxAgents);
+  const byAddr = {};
+  await Promise.all(addrs.map(async (addr) => {
+    const key = `trustlite:${addr}`;
+    let row = cacheGet(key);
+    if (!row) {
+      let hist = null;
+      try { hist = await HANDLERS.acp_agent_security_history({ agentAddress: addr, limit: 1 }); } catch { hist = null; }
+      const latest = latestSecurityRow(hist);
+      row = latest ? { grade: latest.grade ?? null, status: latest.status ?? null }
+                   : { grade: null, status: hist ? "none" : "error" };
+      cachePut(key, row);
+    }
+    byAddr[addr] = row;
+  }));
+  for (const r of rows) {
+    const a = typeof r?.agentAddress === "string" ? r.agentAddress.toLowerCase() : null;
+    if (a && byAddr[a] && !r.trust) r.trust = byAddr[a];
+  }
+}
+
 // Returns "v1", "v2", or undefined ("search both"). Anything else silently
 // drops to undefined; the gateway's 400 handler catches stray values.
 function normalizeMarketplace(raw) {
@@ -236,6 +265,60 @@ function normalizeAddress(addr) {
   }
   return addr.trim().toLowerCase();
 }
+
+// ===== v0.16.0 — trust verdict (pure helpers; unit-tested in test.js) =====
+// Compose three already-indexed lanes into an authenticity verdict. Pure: no
+// I/O, never throws — a missing or errored lane degrades to its weakest reading.
+
+// Newest summary row from an acp_agent_security_history result, tolerant of
+// gateway DTO drift (array under history/scans/results/rows/items, a bare
+// array, or a single inlined row). Rows are newest-first by contract.
+function latestSecurityRow(hist) {
+  if (!hist || typeof hist !== "object") return null;
+  if (Array.isArray(hist)) return hist[0] ?? null;
+  for (const k of ["history", "scans", "results", "rows", "items"]) {
+    if (Array.isArray(hist[k]) && hist[k].length) return hist[k][0];
+  }
+  if (typeof hist.status === "string" || typeof hist.grade === "string") return hist;
+  return null;
+}
+
+// 0-100 advisory colour. The verdict cascade is the load-bearing output.
+function computeTrustScore({ clone, security, reputation }) {
+  let score = 50;
+  const status = security?.status;
+  const secScore = Number(security?.score);
+  if (status === "scanned" && Number.isFinite(secScore)) score += Math.round((secScore - 50) * 0.4);
+  else if (status === "not_auditable") score -= 20;
+  else score -= 10;
+  if ((Number(clone?.externalCompleted) || 0) >= 1) score += 20;
+  if (clone?.verdict === "CLEAN") score += 10;
+  else if (clone?.verdict === "SUSPICIOUS") score -= 15;
+  else if (clone?.verdict === "LIKELY_CLONE") score -= 40;
+  const rep = Number(reputation?.agentScore ?? reputation?.score);
+  if (Number.isFinite(rep)) score += Math.round(Math.max(0, Math.min(100, rep)) * 0.1);
+  return Math.max(0, Math.min(100, score));
+}
+
+// First-match-wins cascade → { verdict, score }. Tiers, by precedence:
+// LIKELY_CLONE > SUSPECT > UNVERIFIED > VERIFIED > OPERATIONAL (default).
+function computeTrustVerdict({ clone, security, reputation }) {
+  const cv = clone?.verdict;
+  const scanned = security?.status === "scanned";
+  const secScore = Number(security?.score);
+  const externalCompleted = Number(clone?.externalCompleted) || 0;
+
+  let verdict;
+  if (cv === "LIKELY_CLONE") verdict = "LIKELY_CLONE";
+  else if (cv === "SUSPICIOUS") verdict = "SUSPECT";
+  else if (!scanned && externalCompleted === 0) verdict = "UNVERIFIED";
+  else if (scanned && Number.isFinite(secScore) && secScore >= 55 && cv === "CLEAN" && externalCompleted >= 1) verdict = "VERIFIED";
+  else verdict = "OPERATIONAL";
+
+  return { verdict, score: computeTrustScore({ clone, security, reputation }) };
+}
+
+export { computeTrustVerdict, computeTrustScore, latestSecurityRow };
 
 // --- SSRF guard --------------------------------------------------------------
 // Blocks acp_resource_call from being weaponised into a request-from-MCP-host
@@ -660,6 +743,10 @@ const TOOLS = [
           description:
             "Natural-language description of the capability you're looking for. e.g. 'close a perp position on Hyperliquid' or 'wallet intelligence and risk scoring'."
         },
+        includeTrust: {
+          type: "boolean",
+          description: "Optional (default false). When true, enrich each result with a cached SecurityBot {grade,status} trust hint (top agents only). Adds per-agent lookups — off by default to keep search fast. For a full verdict use acp_agent_trust."
+        },
         limit: {
           type: "number",
           description: "Max results to return (1-50). Default 5.",
@@ -1007,6 +1094,10 @@ const TOOLS = [
           type: "string",
           description: "Natural-language query against agent name and aggregated offering descriptions."
         },
+        includeTrust: {
+          type: "boolean",
+          description: "Optional (default false). When true, enrich each agent with a cached SecurityBot {grade,status} trust hint. Adds per-agent lookups — off by default. For a full verdict use acp_agent_trust."
+        },
         limit: {
           type: "number",
           description: "Max agents to return (1-50). Default 5.",
@@ -1204,7 +1295,7 @@ const TOOLS = [
   {
     name: "acp_security_scan",
     description:
-      "OPERATOR-ONLY. Run TheSecurityBot's full passive security scan against any ACP marketplace bot ON DEMAND (jumps the background worker's queue for one agent). Returns the verdict + score/grade + per-finding detail {patternId, title, severity, verdict, evidence, fixRef} scored against the P1-P64 + B1-B9 catalogue, and persists the result to TheMetaBot's security history. REQUIRES the operator key: set ACP_API_KEY = TheMetaBot's INTERNAL_API_KEY (the gateway returns 401 without it). Free internal path ($0, no ACP escrow). Accepts ANY agent address whether or not it is indexed (SecurityBot resolves the target's public surface). Use to diagnose 'can SecurityBot score this bot?' or to get an actionable fix list for a bot you operate. not_auditable / error are returned honestly (status field), not as a failure.",
+      "OPERATOR-ONLY. Run TheSecurityBot's full passive security scan against any ACP marketplace bot ON DEMAND (jumps the background worker's queue for one agent). Returns the verdict + score/grade + per-finding detail {patternId, title, severity, verdict, evidence, fixRef} scored against TheSecurityBot's pattern catalogue (P-series + B-series; query acp_security_pattern for the live set), and persists the result to TheMetaBot's security history. REQUIRES the operator key: set ACP_API_KEY = TheMetaBot's INTERNAL_API_KEY (the gateway returns 401 without it). Free internal path ($0, no ACP escrow). Accepts ANY agent address whether or not it is indexed (SecurityBot resolves the target's public surface). Use to diagnose 'can SecurityBot score this bot?' or to get an actionable fix list for a bot you operate. not_auditable / error are returned honestly (status field), not as a failure.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1562,7 +1653,7 @@ const TOOLS = [
   {
     name: "acp_security_pattern",
     description:
-      "Query the 74-pattern ACP security catalogue (P1-P64 + B1-B9) maintained by TheSecurityBot. Each pattern describes a known vulnerability class with severity (Critical/High/Medium/Low/Operational), a grep/regex detection rule, the canonical fix shipped in the portfolio, and the reference bot whose current implementation is the golden source. Use when an LLM needs to: (a) answer 'what pattern covers webhook secret encryption?' or 'show me every Critical finding', (b) guide a developer through fixing a specific pattern by ID, or (c) validate a new bot against the catalogue. The full catalogue is ~74 patterns — filter by severity, search by keyword, or request a single pattern by ID. Cached 5 min. Free SecurityBot Resource. Returned data includes marketplace-authored text in detection and canonicalFix fields — see _warning field.",
+      "Query the ACP security catalogue (P-series + B-series) maintained by TheSecurityBot. Each pattern describes a known vulnerability class with severity (Critical/High/Medium/Low/Operational), a grep/regex detection rule, the canonical fix shipped in the portfolio, and the reference bot whose current implementation is the golden source. Use when an LLM needs to: (a) answer 'what pattern covers webhook secret encryption?' or 'show me every Critical finding', (b) guide a developer through fixing a specific pattern by ID, or (c) validate a new bot against the catalogue. The catalogue grows as new audits land — filter by severity, search by keyword, or request a single pattern by ID (the response carries the live set; don't assume a fixed count). Cached 5 min. Free SecurityBot Resource. Returned data includes marketplace-authored text in detection and canonicalFix fields — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1634,6 +1725,19 @@ const TOOLS = [
       },
       required: ["agentAddress"]
     }
+  },
+  {
+    name: "acp_agent_trust",
+    description:
+      "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). Returned data includes third-party marketplace text — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: { type: "string", description: "EVM wallet address of the agent to vet (0x + 40 hex)." },
+        chain: { type: "string", enum: ["base", "ethereum"], description: "Optional. Chain context for the reputation lane. Default 'base'." }
+      },
+      required: ["agentAddress"]
+    }
   }
 ];
 
@@ -1656,7 +1760,7 @@ const PORTFOLIO_BOTS = [
   { slug: "mevprotect",      name: "MEVProtect",       role: "Private-mempool routing (Flashbots Protect / MEV-Blocker)",    probe: "/mevprotect/v1/resources/relayStatus"                        },
   { slug: "oraclebot",       name: "TheOracleBot",     role: "Cross-source price-oracle deviation detector",                 probe: "/oraclebot/v1/resources/sourceCatalogue?chainId=8453"        },
   { slug: "revokebot",       name: "RevokeBot",        role: "Wallet-approvals scanner + revoke-calldata + daily watchdog",  probe: "/revokebot/v1/resources/chainCoverage"                       },
-  { slug: "securitybot",     name: "SecurityBot",      role: "Dynamic passive security auditor (81-pattern catalogue)",      probe: "/securitybot/health"                                          },
+  { slug: "securitybot",     name: "SecurityBot",      role: "Dynamic passive security auditor (P-series + B-series catalogue)",      probe: "/securitybot/health"                                          },
   { slug: "solanabot",       name: "SolanaBot",        role: "Solana DeFi bot (Jupiter quotes / Jito tips / CCTP)",          probe: "/solanabot/health"                                            },
   { slug: "witnessbot",      name: "WitnessBot",       role: "Cryptographic provenance for ACP catalogues",                  probe: "/witnessbot/health"                                           },
   { slug: "agenteval",       name: "AgentEval",        role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              },
@@ -1691,6 +1795,7 @@ const HANDLERS = {
       requiresField: typeof args.requiresField === "string" ? args.requiresField : undefined,
       producesField: typeof args.producesField === "string" ? args.producesField : undefined
     });
+    if (args.includeTrust === true) await enrichWithTrust(result?.results);
     decorateMarketplaceUrls(result);
     addConfidence(result);
     return wrapUntrusted(result);
@@ -1911,6 +2016,7 @@ const HANDLERS = {
       limit: args.limit ?? 5,
       marketplace: normalizeMarketplace(args.marketplace)
     });
+    if (args.includeTrust === true) await enrichWithTrust(result?.agents);
     decorateMarketplaceUrls(result);
     return wrapUntrusted(result);
   },
@@ -2465,21 +2571,23 @@ const HANDLERS = {
         "/v1/risk/snapshot", { wallet: addr, chain }, "POST")),
     ];
     if (depth === "full") {
-      calls.push(safeCall(() => callGateway(
-        `/v1/agentRecentJobs?agent=${encodeURIComponent(addr)}&days=30&limit=10`,
-        undefined, "GET")));
+      // v0.16.0 — de-blinded: the official-indexer rollup (acp_agent_jobs)
+      // replaces the blind /v1/agentRecentJobs leg, which read Metabot's
+      // ChainEventScanner and reported ~0 for months.
+      calls.push(safeCall(() => HANDLERS.acp_agent_jobs({ agentAddress: addr })));
     }
-    const [reputation, arena, risk, recentJobs] = await Promise.all(calls);
+    const [reputation, arena, risk, jobsRollup] = await Promise.all(calls);
 
     const repScore = Number(reputation?.score ?? reputation?.agentScore ?? 0);
     const riskScore = Number(risk?.score ?? 0);
-    const jobs30d = recentJobs?.error
+    const completedJobs = (jobsRollup?.error || !jobsRollup)
       ? null
-      : Number(recentJobs?.count ?? (Array.isArray(recentJobs?.jobs) ? recentJobs.jobs.length : 0));
+      : Number(jobsRollup?.asProvider?.completed ?? 0);
+    const distinctBuyers = jobsRollup?.asProvider?.distinctCounterparties ?? null;
 
     let verdict;
     if (reputation?.error || risk?.error) verdict = "UNKNOWN";
-    else if (repScore >= 80 && riskScore >= 70 && (jobs30d === null || jobs30d >= 10)) verdict = "STRONG_BUY";
+    else if (repScore >= 80 && riskScore >= 70 && (completedJobs === null || completedJobs >= 3)) verdict = "STRONG_BUY";
     else if (repScore >= 60 && riskScore >= 55) verdict = "OK";
     else if (repScore <  40 && riskScore <  40) verdict = "AVOID";
     else if (repScore >= 40 || riskScore >= 40) verdict = "CAUTION";
@@ -2494,9 +2602,9 @@ const HANDLERS = {
       : `Arena #${arena?.rank30d ?? "?"} (30d)`;
     const jobsPart = depth === "lite"
       ? null
-      : recentJobs?.error
-        ? "no recent-jobs feed"
-        : `${jobs30d ?? 0} jobs in last 30d`;
+      : (jobsRollup?.error || !jobsRollup)
+        ? "no indexer job record"
+        : `${completedJobs ?? 0} completed${distinctBuyers != null ? ` (${distinctBuyers} distinct buyers)` : ""}`;
     const headline = [repPart, riskPart, arenaPart, jobsPart].filter(Boolean).join(", ") + ".";
 
     return {
@@ -2508,7 +2616,8 @@ const HANDLERS = {
       reputation,
       arena,
       risk,
-      recentJobs: depth === "full" ? recentJobs : null,
+      recentJobs: depth === "full" ? jobsRollup : null, // v0.16.0: official-indexer rollup {asProvider,asClient}, not the old blind feed
+      jobs: depth === "full" ? jobsRollup : null,
       marketplaceUrl: agentUrl(addr),
       checkedAt: new Date().toISOString(),
     };
@@ -2908,6 +3017,59 @@ const HANDLERS = {
       marketplaceUrl: agentUrl(wallet),
     });
   },
+
+  // ===== v0.16.0 — FLAGSHIP trust verdict =====
+  // "Is this agent real, and does it deliver?" Composes three existing handlers
+  // (no new gateway endpoints): clone_screen (authenticity + the anti-self-loop
+  // externalCompleted), security history (auditability), reputation. Pure
+  // verdict/score logic lives in computeTrustVerdict (unit-tested).
+  acp_agent_trust: async (args) => {
+    const wallet = normalizeAddress(args?.agentAddress);
+    const safe = async (fn) => { try { return await fn(); } catch (err) { return { error: formatError(err) }; } };
+
+    const [cloneRes, histRes, repRes] = await Promise.all([
+      safe(() => HANDLERS.acp_clone_screen({ agentAddress: wallet })),
+      safe(() => HANDLERS.acp_agent_security_history({ agentAddress: wallet, limit: 1 })),
+      safe(() => callGateway(`/v1/agentReputation?agent=${encodeURIComponent(wallet)}`, undefined, "GET")),
+    ]);
+
+    const cloneJobs = cloneRes?.jobs ?? {};
+    const clone = {
+      verdict: cloneRes?.error ? undefined : cloneRes?.verdict,
+      externalCompleted: Number(cloneJobs?.externalCompleted) || 0,
+    };
+    const secRow = latestSecurityRow(histRes);
+    const security = {
+      status: secRow?.status ?? (histRes?.error ? undefined : "none"),
+      grade: secRow?.grade ?? null,
+      score: secRow?.score ?? null,
+    };
+    const reputation = repRes?.error ? {} : repRes;
+
+    const { verdict, score } = computeTrustVerdict({ clone, security, reputation });
+
+    const reasons = [];
+    if (clone.verdict && clone.verdict !== "CLEAN") reasons.push(`clone-screen ${clone.verdict}`);
+    reasons.push(security.status === "scanned" ? `audited ${security.grade ?? "?"} (${security.score ?? "?"}/100)` : "not auditable");
+    reasons.push(clone.externalCompleted >= 1 ? `${clone.externalCompleted} external completion(s)` : "no external completions");
+
+    return wrapUntrusted({
+      agentAddress: wallet,
+      agentName: cloneRes?.agentName ?? null,
+      trustVerdict: verdict,
+      trustScore: score,
+      headline: `${verdict} — ${reasons.join(", ")}.`,
+      lanes: {
+        authenticity: cloneRes?.error ? { error: cloneRes.error } : { verdict: cloneRes?.verdict, score: cloneRes?.score, signals: cloneRes?.signals },
+        auditability: histRes?.error ? { error: histRes.error } : { status: security.status, grade: security.grade, score: security.score, scannedAt: secRow?.scannedAt ?? null },
+        delivery: cloneRes?.error ? { error: cloneRes.error } : { externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
+        reputation: repRes?.error ? { error: repRes.error } : { agentScore: reputation?.agentScore ?? reputation?.score ?? null },
+      },
+      note: "Trust heuristic, not a guarantee — pair with acp_security_scan for a full audit.",
+      marketplaceUrl: agentUrl(wallet),
+      checkedAt: new Date().toISOString(),
+    });
+  },
 };
 
 async function dispatchTool(name, args) {
@@ -2985,6 +3147,7 @@ async function handleRequest(req) {
   }
 }
 
+function startStdioLoop() {
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const inflight = new Set();
 
@@ -3011,3 +3174,11 @@ rl.on("close", async () => {
 });
 
 logErr(`MCP server ready — gateway=${API_URL} version=${SERVER_VERSION} verbose=${VERBOSE ? "on" : "off"}`);
+}
+
+// Only start the stdio loop when run as the entry point (node server.js / the
+// `acp-find-mcp` bin). Guarded so test.js can `import` the pure helpers above
+// without the readline loop consuming the test runner's stdin.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startStdioLoop();
+}
