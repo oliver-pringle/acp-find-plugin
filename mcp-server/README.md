@@ -11,6 +11,34 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.15.0
+
+**46 tools.** REAL V2 transaction data, read straight from the **official Virtuals
+indexer** (`api.acp.virtuals.io` — the data behind
+[app.virtuals.io/acp/scan/transactions](https://app.virtuals.io/acp/scan/transactions)),
+not the cached scanner. All additive — no existing signatures change.
+
+- **`acp_v2_transactions`** — NEW. One agent's complete on-chain job history: every
+  job's `{ onChainJobId, role (provider=incoming sale / client=outgoing buy), jobStatus
+  (OPEN|COMPLETED|EXPIRED|REJECTED), offering, counterparty, budget }` plus a per-side
+  rollup with `completionRate`. The canonical record — including **completed jobs the
+  cached reputation / recent-hires surfaces miss**.
+- **`acp_agent_jobs`** — NEW. A compact pre-hire reliability rollup: as-provider /
+  as-client `{ total, completed, open, expired, rejected, completionRate,
+  distinctCounterparties }`. The single number that answers "does this agent actually
+  complete the jobs it takes?"
+- **`acp_v2_demand`** — NEW. The real demand leaderboard: top providers by genuine
+  **completed** jobs from the indexer's global activity feed — the signal the cached
+  `recent_hires` / `gainers` surfaces have reported as zero for months.
+- **`acp_clone_screen`** — NEW. A template-clone / spam heuristic for the V2 clone
+  flood: flags github / free-API resource URLs, hourly-timestamp offering spam, bulk
+  near-identical offerings, and self-bootstrap-only job histories →
+  `CLEAN | SUSPICIOUS | LIKELY_CLONE`. Complements the SecurityBot grade (which can't
+  probe off-platform clones).
+- **New slash commands:** `/acp-find:transactions`, `/acp-find:agent-jobs`,
+  `/acp-find:demand`, `/acp-find:clone-screen`.
+- **`acp_portfolio_status` now 16 bots** (adds SafeRouteBot).
+
 ## What's new in v0.14.0
 
 **42 tools, 33 slash commands.** On-demand security scanning + scan history, surfacing
@@ -213,7 +241,18 @@ Five additive extensions backed by **TheMetaBot v1.7** (meta-search release):
 - **`acp_search_agents` `topOfferings`** shape changed from `string[]` to `{ offeringName, priceUsdc, marketplaceVersion }[]`. A `topOfferingNames: string[]` mirror preserves the old shape.
 - All other v0.7.0 changes are **additive** — new fields on existing response objects; no existing fields removed.
 
-## Tools (42)
+## Tools (46)
+
+### V2 transactions & anti-clone (v0.15.0)
+
+Read straight from the official Virtuals indexer (`api.acp.virtuals.io`) — the canonical on-chain record, not the cached scanner.
+
+| Tool | Args | Returns |
+|---|---|---|
+| `acp_v2_transactions` | `agentAddress`, `role?` (`provider`/`client`/`both`), `status?`, `limit?` | One agent's complete job history — each `{ onChainJobId, role, jobStatus, offering, counterparty, budget, timestamps }` + per-side rollup with `completionRate`. Includes completed jobs the cached surfaces miss. |
+| `acp_agent_jobs` | `agentAddress` | Compact pre-hire reliability rollup: `asProvider` / `asClient` `{ total, completed, open, expired, rejected, completionRate, distinctCounterparties }`. |
+| `acp_v2_demand` | `pages?` (1-10), `limit?` | Real demand leaderboard — top providers by genuine `completed` jobs from the global activity feed. |
+| `acp_clone_screen` | `agentAddress` | Template-clone / spam heuristic → `CLEAN` / `SUSPICIOUS` / `LIKELY_CLONE` with `signals[]` (github/free-API resource hosts, hourly-timestamp spam, bulk offerings, self-bootstrap-only jobs). |
 
 ### Search & discovery
 

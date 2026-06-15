@@ -528,6 +528,93 @@ async function callGateway(path, body, method = "POST") {
   return json;
 }
 
+// --- official Virtuals indexer (api.acp.virtuals.io) -----------------------
+// The canonical on-chain job record behind app.virtuals.io/acp/scan/transactions.
+// Public + unauthenticated; DISTINCT from callGateway (which hits TheMetaBot
+// gateway). The V2-transaction tools read this directly because TheMetaBot's
+// homegrown ChainEventScanner has historically been blind to completed jobs.
+const OFFICIAL_INDEXER_URL =
+  (process.env.ACP_INDEXER_URL || "https://api.acp.virtuals.io").replace(/\/+$/, "");
+
+async function callIndexer(path) {
+  const init = {
+    method: "GET",
+    headers: { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  };
+  const startedAt = Date.now();
+  logVerbose(`→ GET (indexer) ${path}`);
+  const res = await fetchWithRetry(`${OFFICIAL_INDEXER_URL}${path}`, init);
+  if (!res.ok) {
+    let text = "";
+    try { text = (await res.text()).slice(0, 2048); } catch {}
+    throw new Error(`indexer ${path} returned ${res.status} ${res.statusText}: ${text || "(empty body)"}`);
+  }
+  const bounded = await readBodyWithLimit(res, GATEWAY_BODY_LIMIT, `${OFFICIAL_INDEXER_URL}${path}`);
+  const json = await bounded.json();
+  logVerbose(`← GET (indexer) ${path} ${res.status} (${Date.now() - startedAt}ms)`);
+  return json;
+}
+
+// Resolve a wallet → V2 agent record { id (UUID), name, ... }.
+async function indexerResolveWallet(wallet) {
+  const r = await callIndexer(`/agents/wallet/${encodeURIComponent(wallet)}`);
+  return (r && typeof r === "object" && r.data) ? r.data : r;
+}
+
+// Page an agent's complete job history (the indexer paginates via nextCursor).
+async function indexerAgentJobs(uuid, maxPages = 6) {
+  const out = [];
+  let cursor;
+  for (let p = 0; p < maxPages; p++) {
+    const qs = cursor ? `?limit=100&cursor=${encodeURIComponent(cursor)}` : "?limit=100";
+    const r = await callIndexer(`/agents/${encodeURIComponent(uuid)}/jobs${qs}`);
+    const batch = Array.isArray(r?.data) ? r.data : (Array.isArray(r) ? r : []);
+    out.push(...batch);
+    cursor = r?.meta?.nextCursor ?? r?.nextCursor;
+    if (!cursor || batch.length === 0) break;
+  }
+  return out;
+}
+
+// Classify a raw indexer job row relative to `uuid`/`wallet` and normalize the
+// fields the transaction tools surface.
+function shapeIndexerJob(j, uuid, wallet) {
+  const provId = j?.providerId ?? j?.provider?.id;
+  // The indexer carries counterparty addresses as sibling fields
+  // (clientAddress / providerAddress), not nested under client/provider.
+  const provAddr = String(j?.providerAddress ?? j?.provider?.address ?? "").toLowerCase();
+  const cliAddr = String(j?.clientAddress ?? j?.client?.address ?? "").toLowerCase();
+  const isProvider = (provId && provId === uuid) || (provAddr && wallet && provAddr === wallet);
+  return {
+    onChainJobId: j?.onChainJobId ?? j?.id,
+    role: isProvider ? "provider" : "client",
+    jobStatus: j?.jobStatus ?? j?.status,
+    offering: j?.description,
+    counterparty: {
+      address: (isProvider ? cliAddr : provAddr) || undefined,
+      name: isProvider ? (j?.client?.name ?? j?.clientName) : (j?.provider?.name ?? j?.providerName),
+    },
+    budget: j?.budget,
+    createdAt: j?.createdAt,
+    updatedAt: j?.updatedAt,
+  };
+}
+
+function rollupIndexerJobs(jobs) {
+  const r = { total: jobs.length, completed: 0, open: 0, expired: 0, rejected: 0, other: 0 };
+  for (const j of jobs) {
+    const s = String(j.jobStatus ?? "").toUpperCase();
+    if (s === "COMPLETED") r.completed++;
+    else if (s === "OPEN") r.open++;
+    else if (s === "EXPIRED") r.expired++;
+    else if (s === "REJECTED") r.rejected++;
+    else r.other++;
+  }
+  r.completionRate = r.total ? Number((r.completed / r.total).toFixed(3)) : null;
+  return r;
+}
+
 // One identifying beacon to the gateway, fired right after MCP `initialize`
 // is handled, so the operator can distinguish "npx-cache populated" from
 // "MCP client actually connected and started this server". Same data
@@ -1495,13 +1582,65 @@ const TOOLS = [
       },
       properties: {}
     }
+  },
+  {
+    name: "acp_v2_transactions",
+    description:
+      "REAL V2 marketplace transactions for one agent, read from the OFFICIAL Virtuals indexer (api.acp.virtuals.io — the source behind app.virtuals.io/acp/scan/transactions), NOT TheMetaBot's homegrown scanner. Resolves the wallet to its V2 agent UUID, pages the agent's complete job history, and returns each job's {onChainJobId, role (provider=incoming sale / client=outgoing buy), jobStatus (OPEN|COMPLETED|EXPIRED|REJECTED), offering, counterparty {address,name}, budget, timestamps} plus a per-side rollup {total, completed, open, expired, rejected, completionRate}. Use to see what an agent has ACTUALLY transacted — and whether its jobs complete — before hiring; this is the canonical on-chain record, including completed jobs the cached reputation/recent-hires surfaces miss. Returned data includes third-party marketplace text — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: { type: "string", description: "EVM wallet address of the agent (0x + 40 hex)." },
+        role: { type: "string", enum: ["provider", "client", "both"], description: "Which side to return: 'provider' = incoming sales, 'client' = outgoing buys, 'both' (default)." },
+        status: { type: "string", enum: ["OPEN", "COMPLETED", "EXPIRED", "REJECTED"], description: "Optional. Only return jobs with this status. The rollup always reflects the FULL history regardless." },
+        limit: { type: "number", description: "Max jobs to return (1-200). Default 50." }
+      },
+      required: ["agentAddress"]
+    }
+  },
+  {
+    name: "acp_agent_jobs",
+    description:
+      "Compact RELIABILITY rollup for an agent from the official Virtuals indexer: as-provider and as-client {total, completed, open, expired, rejected, completionRate, distinctCounterparties}. The single pre-hire number that answers 'does this agent actually complete the jobs it takes?' — derived from the canonical on-chain job record, not the cached/blind reputation surface. Cheaper than acp_v2_transactions (no per-job detail). Returned data includes third-party marketplace text — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: { type: "string", description: "EVM wallet address of the agent (0x + 40 hex)." }
+      },
+      required: ["agentAddress"]
+    }
+  },
+  {
+    name: "acp_v2_demand",
+    description:
+      "The REAL V2 demand leaderboard: top providers ranked by genuine COMPLETED jobs, computed from the official Virtuals indexer's global activity feed (api.acp.virtuals.io/agents/activities). Answers 'who is actually getting hired and delivering on ACP right now?' — the signal Metabot's blind scanner (recent_hires/gainers) has reported as zero for months. Each row: {providerAddress, providerName, completed, distinctClients, jobsSeen}. Note: a bounded sample of recent activity (pages × 100 events); one self-loop or spam farm can dominate raw volume, so completed-by-distinct-clients is the honest read. Returned data includes third-party marketplace text — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pages: { type: "number", description: "How many 100-event pages of the global feed to scan (1-10). Default 3 (~300 events)." },
+        limit: { type: "number", description: "Max providers to return (1-50). Default 20." }
+      },
+      properties: {}
+    }
+  },
+  {
+    name: "acp_clone_screen",
+    description:
+      "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. A complement to the SecurityBot grade, which can't probe off-platform clones. Returned data includes third-party marketplace text — see _warning field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentAddress: { type: "string", description: "EVM wallet address of the agent (0x + 40 hex)." }
+      },
+      required: ["agentAddress"]
+    }
   }
 ];
 
 // --- portfolio bots (v0.13.0) ---------------------------------------------
 //
-// Hardcoded portfolio list for `acp_portfolio_status`. As of v0.13.0 the
-// fleet is the full 15-bot deployed portfolio; if a new bot is added, append
+// Hardcoded portfolio list for `acp_portfolio_status`. As of v0.15.0 the
+// fleet is the full 16-bot deployed portfolio; if a new bot is added, append
 // a row here AND mention it in the CHANGELOG + README "What's new".
 // Probe paths verified live 2026-06-07.
 
@@ -1517,10 +1656,11 @@ const PORTFOLIO_BOTS = [
   { slug: "mevprotect",      name: "MEVProtect",       role: "Private-mempool routing (Flashbots Protect / MEV-Blocker)",    probe: "/mevprotect/v1/resources/relayStatus"                        },
   { slug: "oraclebot",       name: "TheOracleBot",     role: "Cross-source price-oracle deviation detector",                 probe: "/oraclebot/v1/resources/sourceCatalogue?chainId=8453"        },
   { slug: "revokebot",       name: "RevokeBot",        role: "Wallet-approvals scanner + revoke-calldata + daily watchdog",  probe: "/revokebot/v1/resources/chainCoverage"                       },
-  { slug: "securitybot",     name: "SecurityBot",      role: "Dynamic passive security auditor (74-pattern catalogue)",      probe: "/securitybot/health"                                          },
+  { slug: "securitybot",     name: "SecurityBot",      role: "Dynamic passive security auditor (81-pattern catalogue)",      probe: "/securitybot/health"                                          },
   { slug: "solanabot",       name: "SolanaBot",        role: "Solana DeFi bot (Jupiter quotes / Jito tips / CCTP)",          probe: "/solanabot/health"                                            },
   { slug: "witnessbot",      name: "WitnessBot",       role: "Cryptographic provenance for ACP catalogues",                  probe: "/witnessbot/health"                                           },
-  { slug: "agenteval",       name: "AgentEval",        role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              }
+  { slug: "agenteval",       name: "AgentEval",        role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              },
+  { slug: "saferoutebot",    name: "SafeRouteBot",     role: "Non-custodial pre-trade swap safety (GO/CAUTION/BLOCK + route)", probe: "/saferoutebot/v1/resources/safeRouteStatus"                  }
 ];
 
 // --- tool handlers ---------------------------------------------------------
@@ -2637,6 +2777,135 @@ const HANDLERS = {
       count: results.length, totalInCatalogue: all.length, corpusVersion: catalogue.version,
       filters: { patternId: args?.patternId ?? null, severity: args?.severity ?? null, query: args?.query ?? null },
       patterns: results
+    });
+  },
+
+  acp_v2_transactions: async (args) => {
+    const wallet = normalizeAddress(args?.agentAddress);
+    const agent = await indexerResolveWallet(wallet);
+    if (!agent?.id) {
+      return wrapUntrusted({ agentAddress: wallet, error: "agent_not_found_on_indexer", marketplaceUrl: agentUrl(wallet) });
+    }
+    const all = (await indexerAgentJobs(agent.id)).map((j) => shapeIndexerJob(j, agent.id, wallet));
+    const role = ["provider", "client", "both"].includes(args?.role) ? args.role : "both";
+    const status = typeof args?.status === "string" ? args.status.toUpperCase() : undefined;
+    let filtered = all;
+    if (role !== "both") filtered = filtered.filter((j) => j.role === role);
+    if (status) filtered = filtered.filter((j) => String(j.jobStatus ?? "").toUpperCase() === status);
+    const limit = Math.min(Math.max(Number(args?.limit) || 50, 1), 200);
+    return wrapUntrusted({
+      agentAddress: wallet,
+      agentId: agent.id,
+      agentName: agent.name,
+      rollup: {
+        provider: rollupIndexerJobs(all.filter((j) => j.role === "provider")),
+        client: rollupIndexerJobs(all.filter((j) => j.role === "client")),
+      },
+      returned: Math.min(filtered.length, limit),
+      jobs: filtered.slice(0, limit),
+      marketplaceUrl: agentUrl(wallet),
+    });
+  },
+
+  acp_agent_jobs: async (args) => {
+    const wallet = normalizeAddress(args?.agentAddress);
+    const agent = await indexerResolveWallet(wallet);
+    if (!agent?.id) {
+      return wrapUntrusted({ agentAddress: wallet, error: "agent_not_found_on_indexer", marketplaceUrl: agentUrl(wallet) });
+    }
+    const all = (await indexerAgentJobs(agent.id)).map((j) => shapeIndexerJob(j, agent.id, wallet));
+    const distinct = (rows) => new Set(rows.map((j) => j.counterparty?.address).filter(Boolean)).size;
+    const prov = all.filter((j) => j.role === "provider");
+    const cli = all.filter((j) => j.role === "client");
+    const asProvider = rollupIndexerJobs(prov); asProvider.distinctCounterparties = distinct(prov);
+    const asClient = rollupIndexerJobs(cli); asClient.distinctCounterparties = distinct(cli);
+    return wrapUntrusted({
+      agentAddress: wallet, agentId: agent.id, agentName: agent.name,
+      asProvider, asClient, marketplaceUrl: agentUrl(wallet),
+    });
+  },
+
+  acp_v2_demand: async (args) => {
+    const pages = Math.min(Math.max(Number(args?.pages) || 3, 1), 10);
+    const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
+    const byProvider = new Map();
+    let cursor;
+    for (let p = 0; p < pages; p++) {
+      const qs = cursor ? `?limit=100&cursor=${encodeURIComponent(cursor)}` : "?limit=100";
+      let r;
+      try { r = await callIndexer(`/agents/activities${qs}`); }
+      catch (err) { if (p === 0) throw err; break; }
+      const items = Array.isArray(r?.data) ? r.data : (Array.isArray(r) ? r : []);
+      for (const it of items) {
+        const prov = it?.job?.provider ?? it?.provider;
+        const addr = String(prov?.address ?? "").toLowerCase();
+        if (!addr) continue;
+        const e = byProvider.get(addr) ?? { providerAddress: addr, providerName: prov?.name, completed: 0, jobsSeen: 0, clients: new Set() };
+        e.jobsSeen++;
+        // The activity feed types each event in its `name` field
+        // (job.created | job.budget.set | job.completed | intent.created | …).
+        const evt = String(it?.name ?? it?.type ?? "").toLowerCase();
+        if (evt.includes("completed")) {
+          e.completed++;
+          const c = String(it?.job?.client?.address ?? it?.client?.address ?? "").toLowerCase();
+          if (c) e.clients.add(c);
+        }
+        byProvider.set(addr, e);
+      }
+      cursor = r?.meta?.nextCursor ?? r?.nextCursor;
+      if (!cursor || items.length === 0) break;
+    }
+    const providers = [...byProvider.values()]
+      .map((e) => ({ providerAddress: e.providerAddress, providerName: e.providerName, completed: e.completed, distinctClients: e.clients.size, jobsSeen: e.jobsSeen, marketplaceUrl: agentUrl(e.providerAddress) }))
+      .sort((a, b) => b.completed - a.completed || b.distinctClients - a.distinctClients)
+      .slice(0, limit);
+    return wrapUntrusted({ pagesScanned: pages, providersSeen: byProvider.size, providers });
+  },
+
+  acp_clone_screen: async (args) => {
+    const wallet = normalizeAddress(args?.agentAddress);
+    const safe = async (fn) => { try { return await fn(); } catch (err) { return { error: formatError(err) }; } };
+    const [profile, resIdx, agent] = await Promise.all([
+      safe(() => callGateway(`/v1/agent/${encodeURIComponent(wallet)}`, undefined, "GET")),
+      safe(() => callGateway(`/v1/agent/${encodeURIComponent(wallet)}/resources`, undefined, "GET")),
+      safe(() => indexerResolveWallet(wallet)),
+    ]);
+    const offerings = Array.isArray(profile?.offerings) ? profile.offerings : [];
+    const resources = Array.isArray(resIdx?.resources) ? resIdx.resources : [];
+    const signals = [];
+    const BAD_HOSTS = /(^|\.)(github\.com|raw\.githubusercontent\.com|api\.github\.com|frankfurter\.app|emkc\.org|coingecko\.com|api\.coingecko\.com|cryptopanic\.com)$/i;
+    const offHosts = [];
+    for (const r of resources) {
+      try { const h = new URL(r?.url).hostname; if (BAD_HOSTS.test(h)) offHosts.push(h); } catch {}
+    }
+    if (offHosts.length) signals.push({ signal: "off_platform_resource_hosts", detail: [...new Set(offHosts)].slice(0, 6), weight: 2 });
+    const tsSpam = offerings.filter((o) => /idea_\d{8}_\d{4}/i.test(String(o?.offeringName ?? ""))).length;
+    if (tsSpam > 0) signals.push({ signal: "hourly_timestamp_offering_spam", detail: tsSpam, weight: 2 });
+    if (offerings.length >= 30) signals.push({ signal: "bulk_offering_count", detail: offerings.length, weight: 1 });
+    let jobs = { total: 0, completed: 0, externalCompleted: 0 };
+    if (agent?.id) {
+      const raw = await safe(() => indexerAgentJobs(agent.id));
+      const rows = Array.isArray(raw) ? raw.map((j) => shapeIndexerJob(j, agent.id, wallet)) : [];
+      const prov = rows.filter((j) => j.role === "provider");
+      const ext = prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED" && j.counterparty?.address && j.counterparty.address !== wallet);
+      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length };
+      // Only meaningful as a clone tell alongside bulk offerings — a legit new
+      // bot with only internal/dogfood completions is NOT suspicious on its own.
+      if (jobs.total >= 1 && jobs.externalCompleted === 0 && offerings.length >= 30) {
+        signals.push({ signal: "bulk_offerings_no_external_demand", detail: jobs, weight: 1 });
+      }
+    }
+    // Off-platform resource hosts and hourly-timestamp spam are dispositive
+    // clone markers; the supporting signals only escalate to SUSPICIOUS.
+    const strong = signals.some((s) => s.signal === "off_platform_resource_hosts" || s.signal === "hourly_timestamp_offering_spam");
+    const score = signals.reduce((s, x) => s + (x.weight || 1), 0);
+    const verdict = strong ? "LIKELY_CLONE" : score >= 2 ? "SUSPICIOUS" : "CLEAN";
+    return wrapUntrusted({
+      agentAddress: wallet,
+      agentName: profile?.agentName ?? agent?.name,
+      verdict, score, signals, offeringCount: offerings.length, jobs,
+      note: "Heuristic clone/spam screen, not a security audit — pair with acp_security_scan / acp_agent_security_history.",
+      marketplaceUrl: agentUrl(wallet),
     });
   },
 };

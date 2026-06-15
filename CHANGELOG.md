@@ -2,6 +2,33 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.15.0 — 2026-06-15 — Real V2 transactions from the official indexer
+
+Four new tools + four slash commands, all additive — no existing signatures change. Tool count 42→46; slash command count 33→37. Reads the canonical on-chain job record straight from the **official Virtuals indexer** (`api.acp.virtuals.io` — the data behind `app.virtuals.io/acp/scan/transactions`), because TheMetaBot's homegrown ChainEventScanner has historically been blind to completed jobs.
+
+### Added — MCP tools
+
+- **`acp_v2_transactions`** — one agent's complete on-chain job history: every job's `{ onChainJobId, role (provider=incoming sale / client=outgoing buy), jobStatus (OPEN|COMPLETED|EXPIRED|REJECTED), offering, counterparty {address,name}, budget, timestamps }` plus a per-side rollup `{ total, completed, open, expired, rejected, completionRate }`. The canonical record — including completed jobs the cached reputation / recent-hires surfaces miss.
+- **`acp_agent_jobs`** — compact pre-hire reliability rollup: as-provider / as-client `{ total, completed, open, expired, rejected, completionRate, distinctCounterparties }`. The single number answering "does this agent actually complete the jobs it takes?"
+- **`acp_v2_demand`** — real demand leaderboard: top providers by genuine `completed` jobs from the indexer's global activity feed (`pages` × 100 events, default 3). The signal the cached `recent_hires` / `gainers` surfaces have reported as zero for months.
+- **`acp_clone_screen`** — template-clone / spam heuristic for the V2 clone flood: flags github / free-public-API resource URLs, hourly-timestamp offering spam (`idea_YYYYMMDD_HHMM`), bulk near-identical offerings, and self-bootstrap-only job histories → `CLEAN` / `SUSPICIOUS` / `LIKELY_CLONE`. Complements the SecurityBot grade (which can't probe off-platform clones).
+
+### Added — slash commands
+
+- `/acp-find:transactions`, `/acp-find:agent-jobs`, `/acp-find:demand`, `/acp-find:clone-screen`.
+
+### Changed
+
+- `acp_portfolio_status` portfolio list 15→16 bots (adds SafeRouteBot; SecurityBot row catalogue note 74→81).
+
+### Backend context
+
+- New `api.acp.virtuals.io` fetch path (`callIndexer`) alongside the existing `callGateway`; public + unauthenticated, no `X-API-Key` sent. Override with `ACP_INDEXER_URL`. Paginates via `meta.nextCursor`.
+
+### Verification
+
+- `node --check` clean; `npm test` green (46 tools); live smoke (`smoke-v0.15.0.mjs`) against the real gateway + indexer — `acp_v2_transactions` reproduced TheMetaBot's 54/29 job census, `acp_clone_screen` flagged a known clone `LIKELY_CLONE` and a hardened bot `CLEAN`.
+
 ## v0.14.0 — 2026-06-09 — On-demand security scan + scan history
 
 Two new tools + two slash commands, all additive — no existing signatures change. Tool count 40→42; slash command count 31→33. Surfaces SecurityBot's catalogue now grown to **74 patterns (P1-P64 + B1-B9)** after the 2026-06-08 portfolio audit.

@@ -86,6 +86,7 @@ function startServer(env = {}) {
 
 const EXPECTED_TOOLS = [
   "acp_agent_feed_address",
+  "acp_agent_jobs",
   "acp_agent_recent_jobs",
   "acp_agent_reputation",
   "acp_agent_reputation_history",
@@ -99,6 +100,7 @@ const EXPECTED_TOOLS = [
   "acp_arena_overlap",
   "acp_browse_agent",
   "acp_categories",
+  "acp_clone_screen",
   "acp_compare_agents",
   "acp_compose_stack",
   "acp_estimate_stack_cost",
@@ -126,6 +128,8 @@ const EXPECTED_TOOLS = [
   "acp_security_pattern",
   "acp_security_scan",
   "acp_today",
+  "acp_v2_demand",
+  "acp_v2_transactions",
   "acp_watch_status"
 ];
 
@@ -152,7 +156,7 @@ test("initialize handshake returns server info + protocol version", async () => 
   }
 });
 
-test("tools/list returns all 42 tools with required schemas", async () => {
+test("tools/list returns all 46 tools with required schemas", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -793,7 +797,7 @@ test("acp_safe_quote validates required args + address shape", async () => {
   }
 });
 
-test("acp_portfolio_status returns 15-bot envelope even when all probes fail", async () => {
+test("acp_portfolio_status returns 16-bot envelope even when all probes fail", async () => {
   const conn = startServer();
   try {
     await conn.rpc({
@@ -807,8 +811,8 @@ test("acp_portfolio_status returns 15-bot envelope even when all probes fail", a
     assert.equal(r.result.isError, undefined,
       "portfolio_status should not surface as isError even when probes fail");
     const parsed = JSON.parse(r.result.content[0].text);
-    assert.equal(parsed.count, 15);
-    assert.equal(parsed.bots.length, 15);
+    assert.equal(parsed.count, 16);
+    assert.equal(parsed.bots.length, 16);
     assert.equal(parsed.healthyCount, 0, "broken URL means no bot is reachable");
     for (const bot of parsed.bots) {
       assert.ok(bot.name && bot.role, "each bot must carry name + role");
