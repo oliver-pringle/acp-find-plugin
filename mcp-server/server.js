@@ -1148,7 +1148,7 @@ const TOOLS = [
   {
     name: "acp_categories",
     description:
-      "Returns the canonical list of marketplace categories used by acp_find's classification (e.g. 'DEX Swap', 'Wallet Intelligence', 'Token Risk Detection'), each with an `offeringCount` showing how dense that category is on the marketplace. Use this when the user asks 'what kinds of agents are available' or when they want to browse the marketplace by topic rather than by query.",
+      "Returns the canonical list of marketplace categories used by acp_find's classification (e.g. 'DEX Swap', 'Wallet Intelligence', 'Token Risk Detection'), each with an `offeringCount` showing how dense that category is on the marketplace. `offeringCount` is the full v1+v2 corpus; a top-level `countScope` note explains that `acp_marketplace_gap` defaults to the v2-only slice (so its per-category `total` is ~10-12x smaller — they reconcile via that tool's `totalAllMarketplaces`). Use this when the user asks 'what kinds of agents are available' or when they want to browse the marketplace by topic rather than by query.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -1452,7 +1452,7 @@ const TOOLS = [
   {
     name: "acp_marketplace_gap",
     description:
-      "Ranked underserved ACP marketplace niches. Returns top-N categories by opportunityScore (saturation × inverse density), each tagged with a recommendationTag (saturated_avoid | high_volume_low_density | medium_volume_emerging | niche_underserved | balanced). Use to answer 'where should I build a new ACP bot?' or 'what does the marketplace need more of?'. Backs Metabot v1.9 marketplaceGap ($0.30). v0.12.1: accepts marketplace ∈ {v1, v2, both} (default 'v2' — the marketplace new ACP bots actually deploy to). Pass marketplace:'both' for the pre-v0.12.1 combined-corpus view.",
+      "Ranked underserved ACP marketplace niches. Returns top-N categories by opportunityScore (saturation × inverse density), each tagged with a recommendationTag (saturated_avoid | high_volume_low_density | medium_volume_emerging | niche_underserved | balanced). Use to answer 'where should I build a new ACP bot?' or 'what does the marketplace need more of?'. Backs Metabot v1.9 marketplaceGap ($0.30). v0.12.1: accepts marketplace ∈ {v1, v2, both} (default 'v2' — the marketplace new ACP bots actually deploy to). Pass marketplace:'both' for the pre-v0.12.1 combined-corpus view. Each opportunity carries both the slice `total` (the denominator opportunityScore is computed on) AND `totalAllMarketplaces` (the full v1+v2 corpus count, == `acp_categories.offeringCount`); for a single-marketplace slice a `denominatorNote` spells out which is which, so the two surfaces always reconcile.",
     inputSchema: {
       type: "object",
       properties: {

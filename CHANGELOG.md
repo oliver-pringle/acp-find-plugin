@@ -2,6 +2,19 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.16.3 — 2026-06-16 — Marketplace-gap ↔ categories reconciliation documented
+
+Patch — no new tools or signature changes. The Metabot gateway's `/v1/marketplace/gap` + `/v1/categories` responses gained reconciliation fields (shipped server-side); these two pass-through tools' descriptions now document them so the long-standing ~10-12x denominator gap reads as intentional rather than a bug.
+
+### Changed
+
+- **`acp_marketplace_gap`** — description now notes each opportunity carries `totalAllMarketplaces` (the full v1+v2 corpus count, `== acp_categories.offeringCount`) alongside the v2-slice `total`, plus a `denominatorNote` spelling out which denominator `opportunityScore` is computed on for a single-marketplace slice.
+- **`acp_categories`** — description now notes `offeringCount` is the full v1+v2 corpus and that a `countScope` field points to `acp_marketplace_gap` for the per-marketplace slice. The two surfaces, previously a confusing ~10-12x mismatch, now reconcile.
+
+### Verification
+
+- `node --check` clean; `npm test` green (47 tools, 54 tests — unchanged; doc-only). Reconciliation verified live against the gateway: Market Data v2 `total=583` / `totalAllMarketplaces=7648` `== acp_categories.offeringCount=7648` (also Trading Bots, DEX Swap).
+
 ## v0.16.2 — 2026-06-16 — Trust verdict: VERIFIED now requires a genuine third-party buyer
 
 Patch — no new tools or signature changes; refines the delivery signal of two existing tools so an operator dogfooding its own fleet can't earn a `VERIFIED` trust verdict. Additive — the response shape only gains a field.

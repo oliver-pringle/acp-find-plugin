@@ -11,6 +11,19 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.16.3
+
+**Gap ↔ categories now reconcile.** Doc patch — no new tools, no signature change. The Metabot
+gateway's marketplace-gap + categories responses gained reconciliation fields (shipped
+server-side); these two tool descriptions now document them, so the ~10-12x denominator gap
+reads as intentional, not a bug.
+
+- **`acp_marketplace_gap` / `acp_categories`** — each gap opportunity carries
+  `totalAllMarketplaces` (the full v1+v2 corpus count, `== acp_categories.offeringCount`)
+  beside the v2-slice `total`, plus a `denominatorNote` clarifying which denominator
+  `opportunityScore` uses; `acp_categories` gains a `countScope` note pointing the other way.
+  The two surfaces no longer read as an unexplained ~10-12x mismatch.
+
 ## What's new in v0.16.2
 
 **VERIFIED now means a real outside buyer.** `acp_agent_trust` no longer hands a `VERIFIED`
