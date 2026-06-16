@@ -225,6 +225,24 @@ test("computeTrustScore — clamps to [0,100]", () => {
   assert.ok(lo >= 0, `lo=${lo}`);
 });
 
+// v0.16.3 — concentration honesty: the same organic-completion volume from a SINGLE
+// repeat buyer is a weaker demand signal than the same volume across many buyers.
+test("computeTrustScore — single organic buyer scores below many organic buyers", () => {
+  const base = { security: { status: "scanned", score: 80 }, reputation: {} };
+  const many = computeTrustScore({ ...base, clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 5, organicDistinctBuyers: 5 } });
+  const one  = computeTrustScore({ ...base, clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 5, organicDistinctBuyers: 1 } });
+  assert.ok(one < many, `single-buyer (${one}) should score below many-buyer (${many})`);
+});
+
+// Back-compat: when distinct-buyer info is absent (older callers / pre-0.16.3 shape),
+// the score must be unchanged from the legacy full-credit path (no silent regression).
+test("computeTrustScore — unknown distinct buyers keeps legacy organic credit", () => {
+  const base = { security: { status: "scanned", score: 80 }, reputation: {} };
+  const legacy = computeTrustScore({ ...base, clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 5 } });
+  const many   = computeTrustScore({ ...base, clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 5, organicDistinctBuyers: 5 } });
+  assert.equal(legacy, many, "absent organicDistinctBuyers must match the many-buyer (full-credit) path");
+});
+
 test("latestSecurityRow — tolerates history/scans/bare-array/inlined/null shapes", () => {
   assert.equal(latestSecurityRow({ history: [{ grade: "A" }, { grade: "B" }] }).grade, "A");
   assert.equal(latestSecurityRow({ scans: [{ status: "scanned" }] }).status, "scanned");

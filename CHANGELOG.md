@@ -2,6 +2,19 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.16.4 — 2026-06-16 — Trust verdict weights distinct organic buyers
+
+Patch — no new tools or signature changes; additive (the response shape only gains a field). Surfaces buyer *concentration* so "96 organic completions from 1 buyer" no longer reads like broad third-party demand — the marketplace-wide pattern (verified live this round) is that even top-of-leaderboard agents have 1–4 distinct buyers.
+
+### Changed
+
+- **`acp_agent_trust`** — the delivery lane now reports **`organicDistinctBuyers`** alongside `organicExternalCompleted`, and the headline reads "N organic completion(s) from M buyer(s)". The advisory `trustScore` now dampens single-buyer concentration (the organic-demand bonus is +12 instead of +20 when there is exactly one distinct organic buyer). The **verdict cascade is unchanged** — this discloses concentration, it does not re-grade agents; a stricter "≥2 distinct buyers for `VERIFIED`" gate would flip the operator's own front-doors and is deliberately left as a separate decision. Back-compat: callers that don't supply distinct-buyer info keep the legacy full-credit path.
+- **`acp_clone_screen`** — its `jobs` lane now also reports `organicDistinctBuyers`.
+
+### Verification
+
+- `node --check` clean; `npm test` green (47 tools, 56 tests — 2 new: single-buyer score dampening + back-compat guard). Live smoke against the real gateway/indexer: Cybercentry (top-1.2% by volume) → `OPERATIONAL — not auditable, 96 organic completion(s) from 1 buyer.`, `delivery.organicDistinctBuyers: 1`.
+
 ## v0.16.3 — 2026-06-16 — Marketplace-gap ↔ categories reconciliation documented
 
 Patch — no new tools or signature changes. The Metabot gateway's `/v1/marketplace/gap` + `/v1/categories` responses gained reconciliation fields (shipped server-side); these two pass-through tools' descriptions now document them so the long-standing ~10-12x denominator gap reads as intentional rather than a bug.

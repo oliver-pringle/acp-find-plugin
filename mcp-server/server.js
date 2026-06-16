@@ -317,7 +317,13 @@ function computeTrustScore({ clone, security, reputation }) {
   if (status === "scanned" && Number.isFinite(secScore)) score += Math.round((secScore - 50) * 0.4);
   else if (status === "not_auditable") score -= 20;
   else score -= 10;
-  if ((Number(clone?.organicExternalCompleted) || 0) >= 1) score += 20;      // organic third-party demand
+  if ((Number(clone?.organicExternalCompleted) || 0) >= 1) {
+    // Concentration honesty (v0.16.3): the same organic volume from a SINGLE repeat
+    // buyer is a weaker demand signal than the same volume across distinct buyers.
+    // Back-compat: when distinct-buyer info is absent (undefined), keep full credit.
+    const distinct = clone?.organicDistinctBuyers;
+    score += (Number.isFinite(distinct) && distinct <= 1) ? 12 : 20;          // organic third-party demand
+  }
   else if ((Number(clone?.externalCompleted) || 0) >= 1) score += 5;          // portfolio/dogfood only
   if (clone?.verdict === "CLEAN") score += 10;
   else if (clone?.verdict === "SUSPICIOUS") score -= 15;
@@ -3023,7 +3029,7 @@ const HANDLERS = {
     const tsSpam = offerings.filter((o) => /idea_\d{8}_\d{4}/i.test(String(o?.offeringName ?? ""))).length;
     if (tsSpam > 0) signals.push({ signal: "hourly_timestamp_offering_spam", detail: tsSpam, weight: 2 });
     if (offerings.length >= 30) signals.push({ signal: "bulk_offering_count", detail: offerings.length, weight: 1 });
-    let jobs = { total: 0, completed: 0, externalCompleted: 0, organicExternalCompleted: 0 };
+    let jobs = { total: 0, completed: 0, externalCompleted: 0, organicExternalCompleted: 0, organicDistinctBuyers: 0 };
     if (agent?.id) {
       const raw = await safe(() => indexerAgentJobs(agent.id));
       const rows = Array.isArray(raw) ? raw.map((j) => shapeIndexerJob(j, agent.id, wallet)) : [];
@@ -3032,7 +3038,10 @@ const HANDLERS = {
       // Organic = external completions whose counterparty is NOT one of the
       // operator's own portfolio/Tester wallets — the honest third-party signal.
       const organic = ext.filter((j) => !PORTFOLIO_WALLETS.has(String(j.counterparty.address).toLowerCase()));
-      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length };
+      // Distinct organic buyers — "96 completions from 1 buyer" is not the same demand
+      // signal as "96 from 50". Surfaced in the trust delivery lane + headline (v0.16.3).
+      const organicBuyers = new Set(organic.map((j) => String(j.counterparty.address).toLowerCase()));
+      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length, organicDistinctBuyers: organicBuyers.size };
       // Only meaningful as a clone tell alongside bulk offerings — a legit new
       // bot with only internal/dogfood completions is NOT suspicious on its own.
       if (jobs.total >= 1 && jobs.externalCompleted === 0 && offerings.length >= 30) {
@@ -3073,6 +3082,7 @@ const HANDLERS = {
       verdict: cloneRes?.error ? undefined : cloneRes?.verdict,
       externalCompleted: Number(cloneJobs?.externalCompleted) || 0,
       organicExternalCompleted: Number(cloneJobs?.organicExternalCompleted) || 0,
+      organicDistinctBuyers: Number(cloneJobs?.organicDistinctBuyers) || 0,
     };
     const secRow = latestSecurityRow(histRes);
     const security = {
@@ -3088,7 +3098,7 @@ const HANDLERS = {
     if (clone.verdict && clone.verdict !== "CLEAN") reasons.push(`clone-screen ${clone.verdict}`);
     reasons.push(security.status === "scanned" ? `audited ${security.grade ?? "?"} (${security.score ?? "?"}/100)` : "not auditable");
     reasons.push(clone.organicExternalCompleted >= 1
-      ? `${clone.organicExternalCompleted} organic completion(s)`
+      ? `${clone.organicExternalCompleted} organic completion(s) from ${clone.organicDistinctBuyers} buyer(s)`
       : (clone.externalCompleted >= 1 ? `${clone.externalCompleted} completion(s), none organic (portfolio/dogfood)` : "no external completions"));
 
     return wrapUntrusted({
@@ -3100,7 +3110,7 @@ const HANDLERS = {
       lanes: {
         authenticity: cloneRes?.error ? { error: cloneRes.error } : { verdict: cloneRes?.verdict, score: cloneRes?.score, signals: cloneRes?.signals },
         auditability: histRes?.error ? { error: histRes.error } : { status: security.status, grade: security.grade, score: security.score, scannedAt: secRow?.scannedAt ?? null },
-        delivery: cloneRes?.error ? { error: cloneRes.error } : { organicExternalCompleted: clone.organicExternalCompleted, externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
+        delivery: cloneRes?.error ? { error: cloneRes.error } : { organicExternalCompleted: clone.organicExternalCompleted, organicDistinctBuyers: clone.organicDistinctBuyers, externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
         reputation: repRes?.error ? { error: repRes.error } : { agentScore: reputation?.agentScore ?? reputation?.score ?? null },
       },
       note: "Trust heuristic, not a guarantee — pair with acp_security_scan for a full audit.",

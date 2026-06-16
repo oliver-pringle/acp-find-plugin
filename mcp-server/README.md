@@ -11,6 +11,22 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.16.4
+
+**Trust now weights DISTINCT organic buyers.** `acp_agent_trust` no longer lets "N organic
+completions from a single repeat buyer" read like broad demand — the marketplace-wide reality
+is that even top agents are 1-to-few-buyer relationships. Patch — no new tools, no signature
+change; additive (the delivery lane gains a field, the headline discloses it).
+
+- **`acp_agent_trust`** — the delivery lane now reports **`organicDistinctBuyers`** beside
+  `organicExternalCompleted`, and the headline reads "N organic completion(s) from M buyer(s)".
+  The advisory `trustScore` dampens single-buyer concentration (a real but narrow signal) vs.
+  the same volume across many buyers. The load-bearing **verdict cascade is unchanged** — this
+  surfaces concentration, it does not re-grade agents (a stricter "≥2 distinct buyers for
+  VERIFIED" gate would flip the front-doors and is left as a separate decision). Back-compat:
+  callers without distinct-buyer info keep full organic credit.
+- **`acp_clone_screen`** — its `jobs` lane now also reports `organicDistinctBuyers`.
+
 ## What's new in v0.16.3
 
 **Gap ↔ categories now reconcile.** Doc patch — no new tools, no signature change. The Metabot
