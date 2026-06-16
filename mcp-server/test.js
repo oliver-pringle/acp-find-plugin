@@ -194,10 +194,17 @@ test("computeTrustVerdict — UNVERIFIED when not auditable and no external deli
   assert.equal(r.verdict, "UNVERIFIED");
 });
 
-test("computeTrustVerdict — VERIFIED when auditable, clean, and externally delivering", () => {
-  const r = computeTrustVerdict({ clone: { verdict: "CLEAN", externalCompleted: 2 }, security: { status: "scanned", score: 80 }, reputation: { agentScore: 50 } });
+test("computeTrustVerdict — VERIFIED when auditable, clean, and ORGANICALLY delivering", () => {
+  const r = computeTrustVerdict({ clone: { verdict: "CLEAN", externalCompleted: 2, organicExternalCompleted: 2 }, security: { status: "scanned", score: 80 }, reputation: { agentScore: 50 } });
   assert.equal(r.verdict, "VERIFIED");
   assert.ok(r.score > 50, `expected score > 50, got ${r.score}`);
+});
+
+test("computeTrustVerdict — OPERATIONAL when delivery is portfolio/dogfood only (no organic)", () => {
+  // externalCompleted > 0 but organicExternalCompleted == 0 (every counterparty is
+  // one of the operator's own portfolio/Tester wallets) must NOT reach VERIFIED.
+  const r = computeTrustVerdict({ clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 0 }, security: { status: "scanned", score: 90 }, reputation: {} });
+  assert.equal(r.verdict, "OPERATIONAL");
 });
 
 test("computeTrustVerdict — OPERATIONAL when auditable+clean but no proven external delivery", () => {
@@ -212,7 +219,7 @@ test("computeTrustVerdict — degrades gracefully with empty lanes (never throws
 });
 
 test("computeTrustScore — clamps to [0,100]", () => {
-  const hi = computeTrustScore({ clone: { verdict: "CLEAN", externalCompleted: 5 }, security: { status: "scanned", score: 100 }, reputation: { agentScore: 100 } });
+  const hi = computeTrustScore({ clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 5 }, security: { status: "scanned", score: 100 }, reputation: { agentScore: 100 } });
   const lo = computeTrustScore({ clone: { verdict: "LIKELY_CLONE" }, security: { status: "not_auditable" }, reputation: {} });
   assert.ok(hi <= 100, `hi=${hi}`);
   assert.ok(lo >= 0, `lo=${lo}`);

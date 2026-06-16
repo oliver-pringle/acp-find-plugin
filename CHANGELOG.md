@@ -2,6 +2,19 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.16.2 — 2026-06-16 — Trust verdict: VERIFIED now requires a genuine third-party buyer
+
+Patch — no new tools or signature changes; refines the delivery signal of two existing tools so an operator dogfooding its own fleet can't earn a `VERIFIED` trust verdict. Additive — the response shape only gains a field.
+
+### Changed
+
+- **`acp_agent_trust`** — the delivery lane now distinguishes **`organicExternalCompleted`** (COMPLETED jobs from buyers OUTSIDE the operator's own known portfolio wallets) from `externalCompleted` (any non-self counterparty). The **`VERIFIED`** verdict now requires `organicExternalCompleted >= 1` — at least one real third-party buyer — so a fleet operator whose only completions are self / cross-portfolio dogfooding caps at `OPERATIONAL`, not `VERIFIED`. `UNVERIFIED` and `trustScore` still credit any external delivery (lightly). A built-in `PORTFOLIO_WALLETS` set (the 16 deployed bots + Console agent + tester wallet) drives the exclusion.
+- **`acp_clone_screen`** — its `jobs` lane now also reports `organicExternalCompleted` alongside `externalCompleted`, surfacing the same anti-dogfooding signal at the screening layer.
+
+### Verification
+
+- `node --check` clean; `npm test` green (47 tools, 54 tests, incl. a new portfolio-only → `OPERATIONAL` cascade test). Live smoke (`smoke-v0.16.2.mjs`) against the real gateway + indexer: the two front-door bots that drew the one genuine external buyer → `VERIFIED organic=1` (Metabot `external=29` but `organic=1`, so 28 dogfood completions are correctly excluded); a 40-offering clone → `LIKELY_CLONE organic=0`.
+
 ## v0.16.1 — 2026-06-15 — Scan coverage + auditedPatternIds surfaced
 
 Patch — no new tools or signature changes. `acp_security_scan` is a pass-through, so this lands once the Metabot gateway forwards the fields (deployed); the tool description is updated to reflect the richer response.

@@ -11,6 +11,21 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.16.2
+
+**VERIFIED now means a real outside buyer.** `acp_agent_trust` no longer hands a `VERIFIED`
+verdict to an operator dogfooding its own fleet. Patch — no new tools, no signature change;
+the delivery lane just gains a field.
+
+- **`acp_agent_trust`** — the delivery lane now separates **`organicExternalCompleted`**
+  (COMPLETED jobs from buyers OUTSIDE the operator's own known portfolio wallets) from
+  `externalCompleted` (any non-self counterparty). `VERIFIED` now requires
+  `organicExternalCompleted >= 1` — at least one genuine third-party buyer — so a fleet whose
+  only completions are self / cross-portfolio dogfooding caps at `OPERATIONAL`. A built-in
+  `PORTFOLIO_WALLETS` set drives the exclusion.
+- **`acp_clone_screen`** — its `jobs` lane reports `organicExternalCompleted` too, surfacing
+  the same anti-dogfooding signal at the screening layer.
+
 ## What's new in v0.16.1
 
 **Scan coverage is now visible.** `acp_security_scan` returns SecurityBot's **`coverage`**

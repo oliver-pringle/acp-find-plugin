@@ -283,6 +283,32 @@ function latestSecurityRow(hist) {
   return null;
 }
 
+// Operator's own portfolio + test wallets (lowercase). acp_agent_trust subtracts
+// these from "external" completions so a VERIFIED verdict reflects ORGANIC
+// third-party demand, not sibling-bot / Tester dogfood. Mirrors the bot fleet
+// (ACP_Website AgentManifest.All) + the Console agent + the buyer Tester. Keep in
+// sync when a bot is added/rotated. v0.16.2.
+const PORTFOLIO_WALLETS = new Set([
+  "0xecf9773b50f01f3a97b087a6ecdf12a71afc558c", // TheMetabot
+  "0x6f28f51743b912197caeadbc3113c955bb80e738", // TheChainlinkBot
+  "0xa524de81819e213e8bb181fa0b3747a4a6c3a7e3", // TheArenaBot
+  "0xbd9527bdbd61640f544bddd513ed9fcaf9387df8", // TheRevokeBot
+  "0xe9b0f88f8f27a7033f4f9679e93ebcfe1a78f7fd", // TheEASIssuerBot
+  "0x997163304142c3a3ff660ad03069b7d78485ca95", // DeFiEval
+  "0xb97552998e7ee94ef2a260fdc25529ed93e4902b", // AgentEval
+  "0x18362cdc11247ee9e37dea29a1cf21f378ec619f", // LiquidGuard
+  "0x827b2c1de0922314f62bc19554044fd649291ca3", // MEVProtect
+  "0x935e97046b10832664d007430c7b7fd310a6236e", // OracleSentinelBot
+  "0xbbd08418d78c0fd4b26117c15221c4cee015f492", // TheButlerBridgeBot
+  "0x34235a877ee2da8dc9649d46af6f7463bc2206c2", // TheSolanaBot
+  "0xc834e81ebe0921fdf9458ac422861df441a6caf9", // TheWitnessBot
+  "0xa42b7122126245858c3cb0dcd0e4c151f3ea48d5", // TheSecurityBot
+  "0xe7068d66905adb9d266d0dc0612d3b3658242b61", // TheConciergeBot
+  "0xe4bce29bc099e2a04369f6a2df98dc7d5eac2ac7", // TheSafeRouteBot
+  "0x9664e021da516684dacf09577b1b4b7709554f71", // TheMetabot_HermesPAA (Console)
+  "0xa3d8834dc34b2f2e818a4a71074a453b4b77529b", // MetabotTester (buyer dogfood)
+]);
+
 // 0-100 advisory colour. The verdict cascade is the load-bearing output.
 function computeTrustScore({ clone, security, reputation }) {
   let score = 50;
@@ -291,7 +317,8 @@ function computeTrustScore({ clone, security, reputation }) {
   if (status === "scanned" && Number.isFinite(secScore)) score += Math.round((secScore - 50) * 0.4);
   else if (status === "not_auditable") score -= 20;
   else score -= 10;
-  if ((Number(clone?.externalCompleted) || 0) >= 1) score += 20;
+  if ((Number(clone?.organicExternalCompleted) || 0) >= 1) score += 20;      // organic third-party demand
+  else if ((Number(clone?.externalCompleted) || 0) >= 1) score += 5;          // portfolio/dogfood only
   if (clone?.verdict === "CLEAN") score += 10;
   else if (clone?.verdict === "SUSPICIOUS") score -= 15;
   else if (clone?.verdict === "LIKELY_CLONE") score -= 40;
@@ -307,12 +334,17 @@ function computeTrustVerdict({ clone, security, reputation }) {
   const scanned = security?.status === "scanned";
   const secScore = Number(security?.score);
   const externalCompleted = Number(clone?.externalCompleted) || 0;
+  const organicExternalCompleted = Number(clone?.organicExternalCompleted) || 0;
 
   let verdict;
   if (cv === "LIKELY_CLONE") verdict = "LIKELY_CLONE";
   else if (cv === "SUSPICIOUS") verdict = "SUSPECT";
   else if (!scanned && externalCompleted === 0) verdict = "UNVERIFIED";
-  else if (scanned && Number.isFinite(secScore) && secScore >= 55 && cv === "CLEAN" && externalCompleted >= 1) verdict = "VERIFIED";
+  // VERIFIED requires ORGANIC third-party delivery — a completed job whose
+  // counterparty is neither the agent itself nor one of the operator's own
+  // portfolio/Tester wallets. A bot with only sibling-bot/dogfood completions
+  // (externalCompleted>0 but organicExternalCompleted==0) stays OPERATIONAL.
+  else if (scanned && Number.isFinite(secScore) && secScore >= 55 && cv === "CLEAN" && organicExternalCompleted >= 1) verdict = "VERIFIED";
   else verdict = "OPERATIONAL";
 
   return { verdict, score: computeTrustScore({ clone, security, reputation }) };
@@ -1717,7 +1749,7 @@ const TOOLS = [
   {
     name: "acp_clone_screen",
     description:
-      "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. A complement to the SecurityBot grade, which can't probe off-platform clones. Returned data includes third-party marketplace text — see _warning field.",
+      "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. The jobs lane reports both externalCompleted (any non-self counterparty) and organicExternalCompleted (v0.16.2 — excludes the operator's own known portfolio wallets, so dogfooding your own fleet can't masquerade as third-party demand). A complement to the SecurityBot grade, which can't probe off-platform clones. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1729,7 +1761,7 @@ const TOOLS = [
   {
     name: "acp_agent_trust",
     description:
-      "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). Returned data includes third-party marketplace text — see _warning field.",
+      "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). VERIFIED requires organicExternalCompleted >= 1 (v0.16.2) — at least one completed job from a buyer OUTSIDE the operator's own portfolio wallets — so an operator dogfooding its own fleet caps at OPERATIONAL, never VERIFIED. Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2991,13 +3023,16 @@ const HANDLERS = {
     const tsSpam = offerings.filter((o) => /idea_\d{8}_\d{4}/i.test(String(o?.offeringName ?? ""))).length;
     if (tsSpam > 0) signals.push({ signal: "hourly_timestamp_offering_spam", detail: tsSpam, weight: 2 });
     if (offerings.length >= 30) signals.push({ signal: "bulk_offering_count", detail: offerings.length, weight: 1 });
-    let jobs = { total: 0, completed: 0, externalCompleted: 0 };
+    let jobs = { total: 0, completed: 0, externalCompleted: 0, organicExternalCompleted: 0 };
     if (agent?.id) {
       const raw = await safe(() => indexerAgentJobs(agent.id));
       const rows = Array.isArray(raw) ? raw.map((j) => shapeIndexerJob(j, agent.id, wallet)) : [];
       const prov = rows.filter((j) => j.role === "provider");
       const ext = prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED" && j.counterparty?.address && j.counterparty.address !== wallet);
-      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length };
+      // Organic = external completions whose counterparty is NOT one of the
+      // operator's own portfolio/Tester wallets — the honest third-party signal.
+      const organic = ext.filter((j) => !PORTFOLIO_WALLETS.has(String(j.counterparty.address).toLowerCase()));
+      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length };
       // Only meaningful as a clone tell alongside bulk offerings — a legit new
       // bot with only internal/dogfood completions is NOT suspicious on its own.
       if (jobs.total >= 1 && jobs.externalCompleted === 0 && offerings.length >= 30) {
@@ -3037,6 +3072,7 @@ const HANDLERS = {
     const clone = {
       verdict: cloneRes?.error ? undefined : cloneRes?.verdict,
       externalCompleted: Number(cloneJobs?.externalCompleted) || 0,
+      organicExternalCompleted: Number(cloneJobs?.organicExternalCompleted) || 0,
     };
     const secRow = latestSecurityRow(histRes);
     const security = {
@@ -3051,7 +3087,9 @@ const HANDLERS = {
     const reasons = [];
     if (clone.verdict && clone.verdict !== "CLEAN") reasons.push(`clone-screen ${clone.verdict}`);
     reasons.push(security.status === "scanned" ? `audited ${security.grade ?? "?"} (${security.score ?? "?"}/100)` : "not auditable");
-    reasons.push(clone.externalCompleted >= 1 ? `${clone.externalCompleted} external completion(s)` : "no external completions");
+    reasons.push(clone.organicExternalCompleted >= 1
+      ? `${clone.organicExternalCompleted} organic completion(s)`
+      : (clone.externalCompleted >= 1 ? `${clone.externalCompleted} completion(s), none organic (portfolio/dogfood)` : "no external completions"));
 
     return wrapUntrusted({
       agentAddress: wallet,
@@ -3062,7 +3100,7 @@ const HANDLERS = {
       lanes: {
         authenticity: cloneRes?.error ? { error: cloneRes.error } : { verdict: cloneRes?.verdict, score: cloneRes?.score, signals: cloneRes?.signals },
         auditability: histRes?.error ? { error: histRes.error } : { status: security.status, grade: security.grade, score: security.score, scannedAt: secRow?.scannedAt ?? null },
-        delivery: cloneRes?.error ? { error: cloneRes.error } : { externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
+        delivery: cloneRes?.error ? { error: cloneRes.error } : { organicExternalCompleted: clone.organicExternalCompleted, externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
         reputation: repRes?.error ? { error: repRes.error } : { agentScore: reputation?.agentScore ?? reputation?.score ?? null },
       },
       note: "Trust heuristic, not a guarantee — pair with acp_security_scan for a full audit.",
