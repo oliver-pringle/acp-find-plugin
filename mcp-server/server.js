@@ -187,6 +187,20 @@ function agentUrl(addr) {
   return `${MARKETPLACE_URL_BASE}/${encodeURIComponent(addr.toLowerCase())}`;
 }
 
+// Shareable human report + embeddable trust badge for an agent address. The
+// report page and the badge endpoint live on the website (acp-metabot.dev);
+// the badge is keyed by-address so it works for ANY agent, not just portfolio
+// bots. Returns {} for invalid input so callers can spread unconditionally.
+const REPORT_URL_BASE = (process.env.ACP_REPORT_URL_BASE || "https://acp-metabot.dev/agent").replace(/\/$/, "");
+const BADGE_URL_BASE  = (process.env.ACP_BADGE_URL_BASE  || "https://acp-metabot.dev/api/public/badges/by-address").replace(/\/$/, "");
+function trustShareLinks(addr) {
+  if (typeof addr !== "string" || !isHexAddress(addr)) return {};
+  const a = addr.toLowerCase();
+  const reportUrl = `${REPORT_URL_BASE}/${encodeURIComponent(a)}`;
+  const svgUrl = `${BADGE_URL_BASE}/${encodeURIComponent(a)}/trust.svg`;
+  return { reportUrl, badge: { svgUrl, markdown: `[![ACP trust](${svgUrl})](${reportUrl})` } };
+}
+
 // Walk a JSON tree and add `marketplaceUrl` to every object that has an
 // `agentAddress` and doesn't already carry one. Lets the gateway stay agnostic
 // of frontend conventions while every result still gets a hire link.
@@ -357,7 +371,7 @@ function computeTrustVerdict({ clone, security, reputation, found }) {
   return { verdict, score: verdict === "UNKNOWN" ? 0 : computeTrustScore({ clone, security, reputation }) };
 }
 
-export { computeTrustVerdict, computeTrustScore, latestSecurityRow };
+export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks };
 
 // --- SSRF guard --------------------------------------------------------------
 // Blocks acp_resource_call from being weaponised into a request-from-MCP-host
@@ -3093,7 +3107,14 @@ const HANDLERS = {
     };
     const reputation = repRes?.error ? {} : repRes;
 
-    const { verdict, score } = computeTrustVerdict({ clone, security, reputation });
+    // "found" gates UNKNOWN: do we have ANY evidence this is a real agent?
+    // (a marketplace profile, an indexer job record, or a reputation score).
+    const found = Boolean(
+      (cloneRes && !cloneRes.error && ((Number(cloneRes.offeringCount) || 0) > 0 || cloneRes.agentName)) ||
+      (Number(cloneJobs?.total) || 0) > 0 ||
+      Number.isFinite(Number(reputation?.agentScore ?? reputation?.score))
+    );
+    const { verdict, score } = computeTrustVerdict({ clone, security, reputation, found });
 
     const reasons = [];
     if (clone.verdict && clone.verdict !== "CLEAN") reasons.push(`clone-screen ${clone.verdict}`);
@@ -3105,6 +3126,7 @@ const HANDLERS = {
     return wrapUntrusted({
       agentAddress: wallet,
       agentName: cloneRes?.agentName ?? null,
+      ...trustShareLinks(wallet),
       trustVerdict: verdict,
       trustScore: score,
       headline: `${verdict} — ${reasons.join(", ")}.`,

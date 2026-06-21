@@ -13,6 +13,7 @@ import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { computeTrustVerdict, computeTrustScore, latestSecurityRow } from "./server.js";
+import * as server from "./server.js";
 
 // Spin up a one-shot HTTP stub gateway. Returns { url, close, requestLog }.
 // Hands `responder(req, res)` every request so each test programs its own behaviour.
@@ -227,6 +228,19 @@ test("computeTrustVerdict - UNKNOWN when found is false", () => {
 test("computeTrustVerdict - found omitted keeps back-compat (no UNKNOWN)", () => {
   const r = computeTrustVerdict({ clone: { verdict: "CLEAN" }, security: { status: "none" }, reputation: {} });
   assert.equal(r.verdict, "UNVERIFIED");
+});
+
+test("trustShareLinks - builds report + badge for a valid address", () => {
+  const a = "0x" + "a".repeat(40);
+  const r = server.trustShareLinks(a);
+  assert.match(r.reportUrl, /\/agent\/0xa{40}$/);
+  assert.match(r.badge.svgUrl, /by-address\/0xa{40}\/trust\.svg$/);
+  assert.ok(r.badge.markdown.includes(r.badge.svgUrl));
+  assert.ok(r.badge.markdown.includes(r.reportUrl));
+});
+
+test("trustShareLinks - empty object for an invalid address", () => {
+  assert.deepEqual(server.trustShareLinks("not-an-address"), {});
 });
 
 test("computeTrustScore — clamps to [0,100]", () => {
