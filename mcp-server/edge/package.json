@@ -1,0 +1,15 @@
+{
+  "name": "acp-find-edge",
+  "version": "0.17.0",
+  "private": true,
+  "type": "module",
+  "main": "edge.js",
+  "description": "HTTP edge for acp-find: remote Streamable-HTTP MCP + authoritative /trust verdict. Reuses ../server.js. Not published to npm.",
+  "scripts": {
+    "test": "node --test edge.test.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1"
+  }
+}
