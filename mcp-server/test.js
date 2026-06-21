@@ -218,6 +218,17 @@ test("computeTrustVerdict — degrades gracefully with empty lanes (never throws
   assert.ok(r.score >= 0 && r.score <= 100);
 });
 
+test("computeTrustVerdict - UNKNOWN when found is false", () => {
+  const r = computeTrustVerdict({ clone: {}, security: {}, reputation: {}, found: false });
+  assert.equal(r.verdict, "UNKNOWN");
+  assert.equal(r.score, 0);
+});
+
+test("computeTrustVerdict - found omitted keeps back-compat (no UNKNOWN)", () => {
+  const r = computeTrustVerdict({ clone: { verdict: "CLEAN" }, security: { status: "none" }, reputation: {} });
+  assert.equal(r.verdict, "UNVERIFIED");
+});
+
 test("computeTrustScore — clamps to [0,100]", () => {
   const hi = computeTrustScore({ clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 5 }, security: { status: "scanned", score: 100 }, reputation: { agentScore: 100 } });
   const lo = computeTrustScore({ clone: { verdict: "LIKELY_CLONE" }, security: { status: "not_auditable" }, reputation: {} });

@@ -335,7 +335,7 @@ function computeTrustScore({ clone, security, reputation }) {
 
 // First-match-wins cascade → { verdict, score }. Tiers, by precedence:
 // LIKELY_CLONE > SUSPECT > UNVERIFIED > VERIFIED > OPERATIONAL (default).
-function computeTrustVerdict({ clone, security, reputation }) {
+function computeTrustVerdict({ clone, security, reputation, found }) {
   const cv = clone?.verdict;
   const scanned = security?.status === "scanned";
   const secScore = Number(security?.score);
@@ -343,7 +343,8 @@ function computeTrustVerdict({ clone, security, reputation }) {
   const organicExternalCompleted = Number(clone?.organicExternalCompleted) || 0;
 
   let verdict;
-  if (cv === "LIKELY_CLONE") verdict = "LIKELY_CLONE";
+  if (found === false) verdict = "UNKNOWN";
+  else if (cv === "LIKELY_CLONE") verdict = "LIKELY_CLONE";
   else if (cv === "SUSPICIOUS") verdict = "SUSPECT";
   else if (!scanned && externalCompleted === 0) verdict = "UNVERIFIED";
   // VERIFIED requires ORGANIC third-party delivery — a completed job whose
@@ -353,7 +354,7 @@ function computeTrustVerdict({ clone, security, reputation }) {
   else if (scanned && Number.isFinite(secScore) && secScore >= 55 && cv === "CLEAN" && organicExternalCompleted >= 1) verdict = "VERIFIED";
   else verdict = "OPERATIONAL";
 
-  return { verdict, score: computeTrustScore({ clone, security, reputation }) };
+  return { verdict, score: verdict === "UNKNOWN" ? 0 : computeTrustScore({ clone, security, reputation }) };
 }
 
 export { computeTrustVerdict, computeTrustScore, latestSecurityRow };
