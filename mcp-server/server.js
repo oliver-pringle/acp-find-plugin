@@ -761,15 +761,21 @@ function rollupIndexerJobs(jobs) {
 // startup. The `bootBeaconFired` flag ensures we only fire once per process,
 // not once per re-init request from a buggy or reconnecting client.
 let bootBeaconFired = false;
-function fireBootBeacon() {
-  if (bootBeaconFired) return;
+// extra.transport ("stdio" | "http") is appended to the User-Agent so the
+// gateway can split remote-MCP boots from stdio boots (it already parses the
+// version token from the UA). extra.once=false lets the long-lived edge fire
+// per client session instead of once per process.
+function fireBootBeacon(extra = {}) {
+  const transport = extra.transport || "stdio";
+  const once = extra.once !== false;
+  if (once && bootBeaconFired) return;
   bootBeaconFired = true;
   if (DISABLE_BOOT_BEACON) {
     logVerbose("boot beacon: disabled via ACP_DISABLE_BOOT_BEACON");
     return;
   }
 
-  const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION}` };
+  const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION} (${transport})` };
   if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
 
   fetch(`${API_URL}/v1/plugin/boot`, {
@@ -3246,6 +3252,15 @@ rl.on("close", async () => {
 
 logErr(`MCP server ready — gateway=${API_URL} version=${SERVER_VERSION} verbose=${VERBOSE ? "on" : "off"}`);
 }
+
+// Edge entrypoint (mcp-server/edge/edge.js) reuses the tool registry, dispatch,
+// argument validation, concurrency limiter, and boot beacon over an HTTP
+// transport. The published npm package ships server.js only; edge/ is not
+// published, so these exports add no weight to the stdio package.
+export {
+  TOOLS, HANDLERS, dispatchTool, validateToolArgs, withSlot, fireBootBeacon,
+  SERVER_NAME, SERVER_VERSION, PROTOCOL_VERSION,
+};
 
 // Only start the stdio loop when run as the entry point (node server.js / the
 // `acp-find-mcp` bin). Guarded so test.js can `import` the pure helpers above

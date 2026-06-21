@@ -243,6 +243,13 @@ test("trustShareLinks - empty object for an invalid address", () => {
   assert.deepEqual(server.trustShareLinks("not-an-address"), {});
 });
 
+test("server.js exports the edge internals", () => {
+  for (const k of ["TOOLS", "HANDLERS", "dispatchTool", "validateToolArgs", "withSlot", "fireBootBeacon", "SERVER_NAME", "SERVER_VERSION", "PROTOCOL_VERSION"]) {
+    assert.ok(server[k] !== undefined, `missing export: ${k}`);
+  }
+  assert.ok(Array.isArray(server.TOOLS) && server.TOOLS.length >= 47, "TOOLS array length");
+});
+
 test("computeTrustScore — clamps to [0,100]", () => {
   const hi = computeTrustScore({ clone: { verdict: "CLEAN", externalCompleted: 5, organicExternalCompleted: 5 }, security: { status: "scanned", score: 100 }, reputation: { agentScore: 100 } });
   const lo = computeTrustScore({ clone: { verdict: "LIKELY_CLONE" }, security: { status: "not_auditable" }, reputation: {} });
