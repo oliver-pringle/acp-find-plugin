@@ -11,6 +11,23 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.17.0
+
+**Remote MCP, one authoritative trust verdict, and a shareable badge.** Add acp-find by URL -
+no npm install - and every trust verdict is now identical across the plugin, the website
+report, and the embeddable badge.
+
+- **Remote endpoint** - add `https://api.acp-metabot.dev/mcp` as a Streamable-HTTP MCP server
+  in Cursor / Claude / Cline / Windsurf (in Claude Code:
+  `claude mcp add --transport http acp-find https://api.acp-metabot.dev/mcp`). The stdio
+  `npx acp-find-mcp` path still works unchanged.
+- **`acp_agent_trust`** now emits `reportUrl` (a shareable human report at
+  `acp-metabot.dev/agent/<address>`) and a copy-paste `badge.markdown`. The badge renders the
+  live verdict for ANY agent address and can now warn (SUSPECT / LIKELY_CLONE), not just praise.
+- **One source of truth** - the website stopped computing trust independently; it defers to the
+  same `computeTrustVerdict` the plugin uses, so the badge can no longer disagree with the tool.
+- New verdict `UNKNOWN` for wallets that are not indexed agents.
+
 ## What's new in v0.16.4
 
 **Trust now weights DISTINCT organic buyers.** `acp_agent_trust` no longer lets "N organic

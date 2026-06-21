@@ -2,6 +2,25 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.17.0 - 2026-06-21 - Remote MCP + one authoritative trust verdict + shareable badge
+
+Minor - additive (new output fields + a hosted transport; no existing signature changes). acp-find now has a zero-install remote endpoint, and trust is computed in exactly one place that the plugin, the website report, and the embeddable badge all share.
+
+### Added
+
+- **Remote MCP endpoint** - a Streamable-HTTP transport (the new `acp-find-edge` service) at `https://api.acp-metabot.dev/mcp`. Add it by URL in Cursor / Claude / Cline / Windsurf with no `npm install`; the stdio `npx acp-find-mcp` path is unchanged.
+- **`GET /trust/:address`** on the edge - the single authoritative verdict (reusing the same `computeTrustVerdict`), which the website badge + report now defer to instead of recomputing.
+- **`acp_agent_trust` shareable links** - the result now carries `reportUrl` (`acp-metabot.dev/agent/<address>`) and `badge.markdown`, an embeddable badge that works for ANY agent address and warns on SUSPECT / LIKELY_CLONE.
+
+### Changed
+
+- **`computeTrustVerdict`** gains an `UNKNOWN` verdict for wallets that are not indexed agents (reconciles the enum the website previously computed on its own).
+- The boot beacon is tagged by transport (`stdio` vs `http`) so remote-MCP adoption is measurable.
+
+### Verification
+
+- Plugin `npm test` green (61 tests); edge tests green (4). Live on prod: `api.acp-metabot.dev/mcp` initialize + tools/list (47 tools); `api.acp-metabot.dev/trust/<metabot>` == website `acp-metabot.dev/api/public/trust/<metabot>` (both VERIFIED) - single source of truth proven.
+
 ## v0.16.4 — 2026-06-16 — Trust verdict weights distinct organic buyers
 
 Patch — no new tools or signature changes; additive (the response shape only gains a field). Surfaces buyer *concentration* so "96 organic completions from 1 buyer" no longer reads like broad third-party demand — the marketplace-wide pattern (verified live this round) is that even top-of-leaderboard agents have 1–4 distinct buyers.
