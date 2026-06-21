@@ -1,0 +1,31 @@
+# acp-find-edge: remote Streamable-HTTP MCP + authoritative /trust verdict.
+# Deployed on the droplet alongside the bots. Caddy (on acp-shared) reverse-
+# proxies api.acp-metabot.dev/mcp + /trust/* to it; the website (also on
+# acp-shared) calls http://acp-find-edge:8080/trust/:addr for its badge + report.
+#
+#   cd /root/acp-find-plugin
+#   docker compose -f docker-compose.edge.yml up -d --build
+services:
+  acp-find-edge:
+    build:
+      context: ./mcp-server
+      dockerfile: edge/Dockerfile
+    container_name: acp-find-edge
+    restart: unless-stopped
+    environment:
+      # Public gateway (hairpin via Caddy). Trust endpoints are not rate-limited;
+      # the edge never calls /search. The official indexer is reached directly.
+      - ACP_API_URL=https://api.acp-metabot.dev
+      - EDGE_PORT=8080
+      - NODE_ENV=production
+    networks:
+      - acp-shared
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  acp-shared:
+    external: true
