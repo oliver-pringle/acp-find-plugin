@@ -3135,7 +3135,7 @@ const HANDLERS = {
       ...trustShareLinks(wallet),
       trustVerdict: verdict,
       trustScore: score,
-      headline: `${verdict} — ${reasons.join(", ")}.`,
+      headline: `${verdict} - ${reasons.join(", ")}.`,
       lanes: {
         authenticity: cloneRes?.error ? { error: cloneRes.error } : { verdict: cloneRes?.verdict, score: cloneRes?.score, signals: cloneRes?.signals },
         auditability: histRes?.error ? { error: histRes.error } : { status: security.status, grade: security.grade, score: security.score, scannedAt: secRow?.scannedAt ?? null },
