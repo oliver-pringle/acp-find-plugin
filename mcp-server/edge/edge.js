@@ -10,7 +10,8 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
-  TOOLS, dispatchTool, validateToolArgs, withSlot, fireBootBeacon, SERVER_NAME, SERVER_VERSION,
+  dispatchTool, validateToolArgs, withSlot, fireBootBeacon, SERVER_NAME, SERVER_VERSION,
+  toolsForTier, TIER,
 } from "../server.js";
 
 const PORT = Number(process.env.EDGE_PORT) || 8080;
@@ -22,7 +23,7 @@ function buildMcpServer() {
   // Remote boots count once per client session (once:false), not once per
   // process - the edge is long-lived and multiplexes many clients.
   server.oninitialized = () => { try { fireBootBeacon({ transport: "http", once: false }); } catch {} };
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsForTier(TIER) }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const clean = validateToolArgs(req.params.name, req.params.arguments ?? {});
