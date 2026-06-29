@@ -789,7 +789,7 @@ function fireBootBeacon(extra = {}) {
     return;
   }
 
-  const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION} (${transport})` };
+  const headers = { "User-Agent": `acp-find-plugin/${SERVER_VERSION} (${transport}; tier=${TIER})` };
   if (SEND_API_KEY) headers["X-API-Key"] = API_KEY;
 
   fetch(`${API_URL}/v1/plugin/boot`, {
@@ -3261,7 +3261,7 @@ async function handleRequest(req) {
       return; // notifications get no response
 
     case "tools/list":
-      return send({ jsonrpc: "2.0", id, result: { tools: TOOLS } });
+      return send({ jsonrpc: "2.0", id, result: { tools: toolsForTier(TIER) } });
 
     case "tools/call": {
       try {

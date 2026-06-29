@@ -81,7 +81,7 @@ function startServer(env = {}) {
   // surfaces immediately rather than hanging on DNS / a slow real endpoint.
   const child = spawn(process.execPath, [SERVER], {
     stdio: ["pipe", "pipe", "ignore"],
-    env: { ...process.env, ACP_API_URL: "http://127.0.0.1:1", ...env }
+    env: { ...process.env, ACP_API_URL: "http://127.0.0.1:1", ACP_FIND_TIER: "full", ...env }
   });
   return new Conn(child);
 }
@@ -173,6 +173,23 @@ test("tools/list returns all 47 tools with required schemas", async () => {
       assert.ok(tool.description?.length > 10, `${tool.name} needs a description`);
       assert.equal(tool.inputSchema.type, "object", `${tool.name} schema must be object`);
     }
+  } finally {
+    conn.close();
+  }
+});
+
+test("tools/list under ACP_FIND_TIER=core returns the 20-tool CORE surface", async () => {
+  const conn = startServer({ ACP_FIND_TIER: "core" });
+  try {
+    await conn.rpc({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "s", version: "0" } }
+    });
+    const r = await conn.rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const names = r.result.tools.map((t) => t.name);
+    assert.equal(names.length, 20, "core tier lists 20 tools");
+    assert.ok(!names.includes("acp_oracle_drift"), "portfolio tool hidden under core");
+    assert.ok(names.includes("acp_agent_trust"), "core trust tool present");
   } finally {
     conn.close();
   }
@@ -1201,6 +1218,7 @@ test("ACP_VERBOSE redacts query strings by default", async () => {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
+      ACP_FIND_TIER: "full", // resource_call is a FULL-tier tool; this test needs it available
       ACP_API_URL: gw.url,
       ACP_VERBOSE: "1",
       ACP_ALLOW_LOOPBACK_RESOURCES: "1",
