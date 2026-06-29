@@ -44,7 +44,7 @@ Create `mcp-server/smoke-v0.18.0.mjs`:
 // Tier tagging + gating (offline). Run: node smoke-v0.18.0.mjs
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 process.env.ACP_DISABLE_BOOT_BEACON = "1";
@@ -80,8 +80,8 @@ assert.doesNotThrow(() => validateToolArgs("acp_find", { query: "x" }));
 
 // Gate the other direction: under full, the full-only tool is allowed (child process).
 const here = dirname(fileURLToPath(import.meta.url));
-const serverPath = resolve(here, "server.js").replace(/\\/g, "/");
-const code = `import { validateToolArgs } from ${JSON.stringify(serverPath)};` +
+const serverUrl = pathToFileURL(resolve(here, "server.js")).href; // ESM needs file:// on Windows
+const code = `import { validateToolArgs } from ${JSON.stringify(serverUrl)};` +
   ` validateToolArgs("acp_oracle_drift", {}); console.log("ALLOWED");`;
 const out = execFileSync(process.execPath, ["--input-type=module", "-e", code], {
   env: { ...process.env, ACP_FIND_TIER: "full", ACP_DISABLE_BOOT_BEACON: "1" },

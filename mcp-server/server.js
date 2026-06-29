@@ -29,6 +29,19 @@ const DISABLE_BOOT_BEACON = !!process.env.ACP_DISABLE_BOOT_BEACON;
 const ALLOW_PLAINTEXT_KEY = !!process.env.ACP_ALLOW_PLAINTEXT_KEY;
 const ALLOW_CUSTOM_GATEWAY = !!process.env.ACP_ALLOW_CUSTOM_GATEWAY;
 
+// Tool-surface tier. CORE (default) = the lean trust+discovery set the remote
+// endpoint and bare npx package expose; FULL = the whole portfolio surface the
+// Claude Code plugin opts into via ACP_FIND_TIER=full in its .mcp.json.
+// logErr is a hoisted function declaration (defined below), callable here.
+const TIER = (() => {
+  const raw = (process.env.ACP_FIND_TIER || "core").toLowerCase();
+  if (raw !== "core" && raw !== "full") {
+    logErr(`[config] ACP_FIND_TIER="${raw}" is not "core" or "full"; defaulting to "core".`);
+    return "core";
+  }
+  return raw;
+})();
+
 const EXPECTED_GATEWAY_HOSTS = new Set([
   "api.acp-metabot.dev",
 ]);
@@ -544,6 +557,7 @@ const ADDRESS_ARGS = new Set(["agentAddress", "address", "wallet"]);
 const ADDRESS_ARRAY_ARGS = new Set(["agentAddresses"]);
 
 function validateToolArgs(toolName, args) {
+  assertToolInTier(toolName);
   if (args == null) return {};
   if (typeof args !== "object" || Array.isArray(args)) {
     throw new Error(`tool ${toolName}: arguments must be an object`);
@@ -792,6 +806,7 @@ function fireBootBeacon(extra = {}) {
 const TOOLS = [
   {
     name: "acp_find",
+    tier: "core",
     description:
       "Semantic search across every offering in the Virtuals Protocol ACP marketplace. Returns ranked agents with similarity scores, prices, descriptions, a `marketplaceVersion` (`v1` | `v2`), a `marketplaceUrl` for one-click hire, and a reputation block. Searches V1 + V2 marketplaces in one call by default. Uses hybrid BM25 + dense fusion so rare-keyword queries (contract addresses, tickers, niche jargon) work alongside semantic ones. Returns a `confidence` bucket (high|medium|low|sketchy|none) derived from the top score. Each result now includes `saturation` (nearDuplicateCount + categorySize — how crowded the niche is) and `pricePercentile` (value 0-100 within category × marketplace, peerN, lowN flag). Optional filters: priceMaxUsdc, chain, minReputation, freshness/includeStale, category, marketplace, offset (pagination). Use for 'is there an agent that can do X' questions. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -897,6 +912,7 @@ const TOOLS = [
   },
   {
     name: "acp_compose_stack",
+    tier: "core",
     description:
       "LLM-curated multi-agent ACP stack for a stated use case. Returns an ordered list of offerings (each tagged with `marketplaceVersion` and `marketplaceUrl`) plus a rationale describing how they compose. Searches V1 + V2 marketplaces by default. Use for multi-step workflows. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -932,6 +948,7 @@ const TOOLS = [
   },
   {
     name: "acp_agent_reputation",
+    tier: "core",
     description:
       "Look up the cached on-chain behavioural reputation for an ACP agent (0-100 score from completion rate, dispute rate, recency, 30-day throughput, and average response time). Returns the latest score plus a 30-day daily trajectory so you can see whether the agent is improving or declining. Returns 404 if the agent has not yet been evaluated; in that case, hire the agentReputation offering on the marketplace to force a live computation. Response includes a `marketplaceUrl` for one-click profile.",
     inputSchema: {
@@ -947,6 +964,7 @@ const TOOLS = [
   },
   {
     name: "acp_agent_reputation_history",
+    tier: "full",
     description:
       "Day-by-day on-chain reputation trajectory for an ACP agent (up to 90 days). Each row is a UTC date plus that day's agentScore and per-sub-score breakdown. Use to spot improving or declining agents over time, or after acp_agent_reputation when the user wants the full longer-term trend rather than the inline 30-day snapshot.",
     inputSchema: {
@@ -968,6 +986,7 @@ const TOOLS = [
   },
   {
     name: "acp_today",
+    tier: "core",
     description:
       "Marketplace pulse digest. Returns offerings launched in the last N days plus the biggest hire-count gainers. Window: 1–90 days (default 1). Each result is tagged with `marketplaceVersion` and `marketplaceUrl`. Spans both marketplaces by default. Response includes pulse fields: `newAgents` (agent inflow in window), `churnRate` (fraction gone inactive), `cohortSurvival` (null when days < 30), `saturationMap` (per-category near-duplicate density), `partial` (true when window crosses a data gap). Optional filters: chain, priceMaxUsdc, marketplace. Use for 'what's new on ACP', 'show me what just launched', 'what's trending', or 'show me marketplace health stats'. Returned data includes third-party marketplace text — see _warning field. Each offering now carries a per-agent security object {score, grade, status, scannedAt} from SecurityBot (status 'pending' until first scanned).",
     inputSchema: {
@@ -998,6 +1017,7 @@ const TOOLS = [
   },
   {
     name: "acp_browse_agent",
+    tier: "core",
     description:
       "Full profile for an ACP agent by wallet address. Returns the agent's reputation summary plus every offering they own with full descriptions, requirement schemas, prices, per-offering reputation, and a `marketplaceUrl`. In v1.7 the response also includes a top-level `crossPresence` block summarising the agent's V1/V2 footprint (offeringCount per marketplace, dominantMarketplace: 'v1'|'v2'|'tied'|'none') and per-offering `pricePercentile` (value 0-100, peerN, lowN). Use when the user pastes a wallet address and asks 'what does this agent do', or after acp_find when the user wants the full picture of a specific agent. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1013,6 +1033,7 @@ const TOOLS = [
   },
   {
     name: "acp_offering",
+    tier: "core",
     description:
       "Deep-dive on a single offering by (agentAddress, offeringName). Returns just that offering's full description, requirement schema, price, lifetime hires, and per-offering reputation, plus a `marketplaceUrl`. Use when the user has narrowed in on one offering and wants to see exactly what it accepts as input before they hire. Faster than parsing the full agent profile when only one offering matters. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1032,6 +1053,7 @@ const TOOLS = [
   },
   {
     name: "acp_compare_agents",
+    tier: "core",
     description:
       "Side-by-side comparison of 2-5 agents by wallet address. For each agent: lifetime offerings count, summary reputation (jobs / score / percentile), and behavioural reputation (completion / dispute / recency / volume30d / responseTime sub-scores) when cached. Use after acp_find when the user has shortlisted candidates and wants a structured comparison before hiring. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1050,6 +1072,7 @@ const TOOLS = [
   },
   {
     name: "acp_watch_status",
+    tier: "full",
     description:
       "Read the current state of a marketplace watch by id. Watches are registered by hiring TheMetaBot's `watch` offering and fire a webhook on new matches for a saved query. This tool is read-only — it returns whether the watch is alive, when it expires, how many alerts have fired, and the watch's query and filters. Sensitive fields (buyer address, webhook URL) are not returned.",
     inputSchema: {
@@ -1065,6 +1088,7 @@ const TOOLS = [
   },
   {
     name: "acp_recent_hires",
+    tier: "full",
     description:
       "Top offerings by absolute hire-count growth in the last N days. Different from acp_today (which mixes new launches and gainers); this surface is purely 'what's getting hired right now' so users can see traction concentrating. Tagged with `marketplaceVersion` and `marketplaceUrl`. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1111,6 +1135,7 @@ const TOOLS = [
   },
   {
     name: "acp_agent_recent_jobs",
+    tier: "full",
     description:
       "Recent on-chain job ledger for one agent: per-job (jobId, status, counterparty, amount, createdAt). Built from the chain-event scanner. Use when a user wants to see whether an agent is actually being hired and what the recent traffic looks like, before committing to a job themselves. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1144,6 +1169,7 @@ const TOOLS = [
   },
   {
     name: "acp_search_agents",
+    tier: "core",
     description:
       "Hybrid (BM25 + dense + Voyage rerank) agent search. Searches AGENTS (not offerings) by query against agent name + bio + aggregated offering descriptions. Distinct from acp_find which searches the offering corpus. Returns ranked agents with `marketplaces` (array of 'v1'|'v2' where the agent has offerings), `dominantMarketplace` ('v1'|'v2'|'tied'|'none'), `agentScore` (post-rerank cosine, higher = more relevant — treat as opaque rank signal), `topOfferings` (records with offeringName, priceUsdc, marketplaceVersion), and `topOfferingNames` (mirror of names-only for quick display). Response key is `agents`. Use when the user wants to discover providers by what THEY do across all their offerings. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1174,18 +1200,21 @@ const TOOLS = [
   },
   {
     name: "acp_categories",
+    tier: "core",
     description:
       "Returns the canonical list of marketplace categories used by acp_find's classification (e.g. 'DEX Swap', 'Wallet Intelligence', 'Token Risk Detection'), each with an `offeringCount` showing how dense that category is on the marketplace. `offeringCount` is the full v1+v2 corpus; a top-level `countScope` note explains that `acp_marketplace_gap` defaults to the v2-only slice (so its per-category `total` is ~10-12x smaller — they reconcile via that tool's `totalAllMarketplaces`). Use this when the user asks 'what kinds of agents are available' or when they want to browse the marketplace by topic rather than by query.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "acp_health",
+    tier: "core",
     description:
       "Diagnostic check on the public ACP_Metabot gateway. Returns gateway URL, server version, plugin version, MCP protocol version, indexed-corpus size (with V1 vs V2 split), last indexer fetch time, category-classifier readiness, and round-trip ping in ms. Use when search/stack tools return errors, when the user asks 'is acp-find working?', or to confirm the gateway is reachable before a long session.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "acp_agent_resources",
+    tier: "full",
     description:
       "Lists the ACP v2 Resources registered by a specific agent. Resources are free, parameterised, public HTTP endpoints (AcpAgentResource: name + url + params + description) that buyer / orchestrator agents call BEFORE paying for an offering — to check status, validate the target is supported, look up cached results, etc. Use when the user has identified an agent (via acp_find or acp_browse_agent) and wants to know what FREE introspection it exposes before hiring. Returns an empty list when the agent has no Resources indexed. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1201,6 +1230,7 @@ const TOOLS = [
   },
   {
     name: "acp_resources_search",
+    tier: "full",
     description:
       "Search across every indexed agent's ACP v2 Resources by free-text query. Matches name + description + agent name. Use when the user wants to discover agents by the FREE pre-hire surface they expose (e.g. 'find an agent with a tradingStatusCheck resource', 'which agents expose a feedCatalogue resource'). Returns up to 100 results ordered by recency. Distinct from acp_find (which searches priced offerings); use this for the meta-question of WHICH agents publish Resources at all. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1225,6 +1255,7 @@ const TOOLS = [
   },
   {
     name: "acp_resource_call",
+    tier: "full",
     description:
       "Invoke a specific Resource on an agent by calling its registered URL. Resources are free, public HTTP endpoints — this tool first looks up the URL via Metabot's index (the same data acp_agent_resources / acp_resources_search return), then forwards the call directly to the agent's bot. Use AFTER acp_agent_resources or acp_resources_search has identified the Resource you want. Returns the agent's JSON response (or rawText for non-JSON). Resources are public — no API key, no payment. 30s timeout per call. Errors if the agent isn't indexed by Metabot, has no Resource by that name, or the agent's bot is unreachable. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1248,6 +1279,7 @@ const TOOLS = [
   },
   {
     name: "acp_estimate_stack_cost",
+    tier: "core",
     description:
       "Roll up the projected monthly cost of a stack of ACP offerings. Use after acp_compose_stack or when the user has hand-picked a set of offerings and asks 'what does this cost me per month?'. One-shot offerings: monthlyUsd = priceUsd × usesPerMonth (defaults to 1 if not specified). Subscription offerings: monthlyUsd = priceUsd × 30 / durationDays (defaults to 30-day tier). Includes a budget check when budgetUsdMonthly is supplied. Pure calculation — no network calls, no fetch from the marketplace; caller passes the price data inline.",
     inputSchema: {
@@ -1280,6 +1312,7 @@ const TOOLS = [
   },
   {
     name: "acp_agent_feed_address",
+    tier: "full",
     description:
       "Look up the on-chain Chainlink reputation aggregator (AggregatorV3Interface) address that TheMetaBot has published for an agent. Returned address is a per-agent ReputationAggregator contract on Base mainnet (chainId 8453) that exposes the agent's behavioural-reputation score as a standard `latestRoundData()` feed — letting Solidity code gate by counterparty reputation without going through any off-chain API. Use when the user wants to (a) verify-onchain integrate an agent's reputation into a smart contract, (b) check whether Metabot has published a feed for a given agent yet, or (c) get the explorer URL of the aggregator. Returns 404 with a 'not yet published' hint when no feed has been deployed for the agent (only the top-N highest-reputation agents currently have feeds).",
     inputSchema: {
@@ -1295,6 +1328,7 @@ const TOOLS = [
   },
   {
     name: "acp_arena_check",
+    tier: "full",
     description:
       "Look up a single ACP agent's Degen Arena (degen.virtuals.io) state. Returns isParticipant + ranks (lifetime + 30d) + lifetime + 30d PnL + lastWeekPick flag + first-seen timestamp. Cached by Metabot's ArenaSourceWorker on a 15-min cadence from ArenaBot's free Resources. Use BEFORE paying for ArenaBot's deeper `arena_agent_report` — this tells you whether the agent is an Arena participant at all and at what rank. Returns isParticipant=false for agents not on the leaderboard, OR when Metabot's Arena pipeline is inactive (the cross-bot ArenaSourceWorker is OFF by default; check `acp_health` or `arenaParticipantCount` Resource for system-wide state). Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1310,6 +1344,7 @@ const TOOLS = [
   },
   {
     name: "acp_arena_leaderboard",
+    tier: "full",
     description:
       "Returns Metabot's indexed Degen Arena leaderboard, ordered by past-30-day rank ascending (lowest rank = best performer). Each entry includes the agent address, current lifetime + 30d ranks, 30d PnL, last-week AI Council pick flag, and last-observed timestamp. Use when the user asks 'who's winning on Degen', 'show me the top Arena agents', or wants to feed a downstream search by overlapping with marketplace presence (see `acp_arena_overlap`). Returns { count, agents[] }. Empty (count=0) until Metabot's Arena pipeline is enabled. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1324,6 +1359,7 @@ const TOOLS = [
   },
   {
     name: "acp_arena_council_picks",
+    tier: "full",
     description:
       "Returns the Degen Arena AI Council's weekly Top-10 picks for the $200K copy-trade pot. Groups by weekStart (Monday 16:30 UTC selection time, per dgclaw-skill docs). Each pick row contains agentAddress + pickRank (1..10). Use when the user asks 'who got picked this week on Arena', 'show me Arena Council history', or to track who's consistently getting selected by the LLM jury. Sourced from Metabot's cached council picks table — empty until the Arena pipeline is enabled AND at least one Monday has passed. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1338,6 +1374,7 @@ const TOOLS = [
   },
   {
     name: "acp_arena_overlap",
+    tier: "full",
     description:
       "Cross-section: of the Top-N Degen Arena agents indexed by Metabot, how many ALSO sell ACP offerings on app.virtuals.io? Returns { arenaTopN, arenaSampled, sellingOnAcp, overlapFraction, agents[] } where each match row has the agent's address, current Arena 30d rank, and ACP offering count. High overlapFraction is a strong buyer-side signal: traders winning real money on Arena who also sell services on ACP are credentialed sellers. Empty (overlapFraction=0) until Metabot's Arena pipeline is enabled. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1353,6 +1390,7 @@ const TOOLS = [
 
   {
     name: "acp_security_scan",
+    tier: "core",
     description:
       "OPERATOR-ONLY. Run TheSecurityBot's full passive security scan against any ACP marketplace bot ON DEMAND (jumps the background worker's queue for one agent). Returns the verdict + score/grade + coverage band (high/medium/low) + auditedPatternIds[] (the patterns actually exercised this scan — so a 'C at low coverage' is distinguishable from a 'C from real findings') + per-finding detail {patternId, title, severity, verdict, evidence, fixRef} scored against TheSecurityBot's pattern catalogue (P-series + B-series; query acp_security_pattern for the live set), and persists the result to TheMetaBot's security history. REQUIRES the operator key: set ACP_API_KEY = TheMetaBot's INTERNAL_API_KEY (the gateway returns 401 without it). Free internal path ($0, no ACP escrow). Accepts ANY agent address whether or not it is indexed (SecurityBot resolves the target's public surface). Use to diagnose 'can SecurityBot score this bot?' or to get an actionable fix list for a bot you operate. not_auditable / error are returned honestly (status field), not as a failure.",
     inputSchema: {
@@ -1369,6 +1407,7 @@ const TOOLS = [
 
   {
     name: "acp_agent_security_history",
+    tier: "full",
     description:
       "Past SecurityBot scan results for an ACP agent, newest first (the append-only history behind acp_today's per-offering `security` field). Each row is a SUMMARY: { scannedAt, status, score, grade, verdict, findingCount, observableCount, corpusVersion, severityCounts }. status is scanned | not_auditable | error. Raw per-finding detail is intentionally NOT returned here (it stays server-side); use the operator-only acp_security_scan for a fresh scan that includes the full findings[]. Public, no API key. Empty history (count 0) for an agent that has never been scanned. Use to see whether a bot's security posture is improving or regressing over time before hiring it.",
     inputSchema: {
@@ -1395,6 +1434,7 @@ const TOOLS = [
   // Resource wrappers and one client-side composite (`acp_agent_verify`).
   {
     name: "acp_risk_snapshot",
+    tier: "full",
     description:
       "Composite portfolio risk score (0-100) for any EVM wallet, blended across four dimensions: healthFactor (LiquidGuard, weight 0.3), approvals (RevokeBot, 0.3), mevExposure (MEVProtect, 0.2), reputation (TheMetaBot, 0.2). Unavailable components are dropped and remaining weights renormalised — see `acp_risk_rubric` for the methodology and `acp_risk_sources` for live source health. Returns grade A-F + per-component sub-scores. Backs the Metabot v1.8 riskSnapshot offering ($0.05 on the marketplace); this MCP wrapper is free pass-through. Use as a pre-hire safety signal for any EVM wallet (not just ACP sellers).",
     inputSchema: {
@@ -1415,6 +1455,7 @@ const TOOLS = [
   },
   {
     name: "acp_risk_deep_dive",
+    tier: "full",
     description:
       "Full risk breakdown for an EVM wallet — same four dimensions as `acp_risk_snapshot` but with live RPC reads for sub-component context (active borrows, top approvals, recent MEV-bundled txs, reputation trajectory) plus per-dimension recommendations. Slower than snapshot (~3-5 sec); use when the snapshot returned a CAUTION-range score and the user wants the why. Backs Metabot v1.8 riskDeepDive ($0.20).",
     inputSchema: {
@@ -1435,6 +1476,7 @@ const TOOLS = [
   },
   {
     name: "acp_risk_compare",
+    tier: "full",
     description:
       "Side-by-side risk for 2-5 EVM wallets. Returns each wallet's full snapshot envelope plus a normalised ranking (top = lowest risk). Distinct from `acp_compare_agents` (which compares ACP-seller reputation + offerings) — `acp_risk_compare` works on ANY EVM wallet, not just registered ACP agents. Use to disambiguate between multiple wallet candidates when the user is hiring an agent that interacts with one of them. Backs Metabot v1.8 riskCompare ($0.10).",
     inputSchema: {
@@ -1458,6 +1500,7 @@ const TOOLS = [
   },
   {
     name: "acp_risk_attestation",
+    tier: "full",
     description:
       "Risk snapshot wrapped in a structured attestation envelope. When Metabot has published the attestation on-chain via EASIssuer (Base mainnet), the response includes `attestationUid` + `txHash` + `blockNumber` — same shape as TheOracleBot's attest_publish path. Use when the user needs to anchor a risk verdict on-chain for downstream Solidity gating (e.g. a vault that refuses deposits from wallets attested 'high risk'). Backs Metabot v1.8 riskAttestation ($1.00).",
     inputSchema: {
@@ -1478,6 +1521,7 @@ const TOOLS = [
   },
   {
     name: "acp_marketplace_gap",
+    tier: "core",
     description:
       "Ranked underserved ACP marketplace niches. Returns top-N categories by opportunityScore (saturation × inverse density), each tagged with a recommendationTag (saturated_avoid | high_volume_low_density | medium_volume_emerging | niche_underserved | balanced). Use to answer 'where should I build a new ACP bot?' or 'what does the marketplace need more of?'. Backs Metabot v1.9 marketplaceGap ($0.30). v0.12.1: accepts marketplace ∈ {v1, v2, both} (default 'v2' — the marketplace new ACP bots actually deploy to). Pass marketplace:'both' for the pre-v0.12.1 combined-corpus view. Each opportunity carries both the slice `total` (the denominator opportunityScore is computed on) AND `totalAllMarketplaces` (the full v1+v2 corpus count, == `acp_categories.offeringCount`); for a single-marketplace slice a `denominatorNote` spells out which is which, so the two surfaces always reconcile.",
     inputSchema: {
@@ -1503,18 +1547,21 @@ const TOOLS = [
   },
   {
     name: "acp_risk_sources",
+    tier: "full",
     description:
       "Health of every data source feeding the risk pipeline. Returns per-source status (fresh | stale | unavailable) for LiquidGuard, RevokeBot, MEVProtect, and TheMetaBot's reputation lane, plus an overall verdict (FRESH | DEGRADED | UNAVAILABLE). Use BEFORE paying for risk_snapshot when the user needs full-confidence data — DEGRADED means some component scores are missing and weights have been renormalised. Cached 5 min. Free Metabot Resource.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "acp_risk_rubric",
+    tier: "full",
     description:
       "Methodology behind the 0-100 risk score. Returns the per-component weights (healthFactor 0.3, approvals 0.3, mevExposure 0.2, reputation 0.2), the grade bands (A=85+ / B=70+ / C=55+ / D=40+ / F), and the bucket tables used to score each dimension. Use to explain a verdict to the user or to gate downstream logic on grade rather than raw score. Cached 5 min. Free Metabot Resource.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "acp_agent_verify",
+    tier: "core",
     description:
       "Composite pre-hire safety check for any EVM wallet. Runs reputation + arena + recentJobs + risk_snapshot in parallel and synthesises a rule-based verdict (STRONG_BUY | OK | CAUTION | AVOID | UNKNOWN) with a one-sentence headline. Saves 4 client round-trips and a buyer-side reasoning step. Errors in any sub-call are surfaced as `{ error }` inside that dimension — partial verdicts are explicitly allowed. Set `depth: 'lite'` to skip the recentJobs leg (3 sub-calls instead of 4). Default `depth: 'full'`.",
     inputSchema: {
@@ -1546,6 +1593,7 @@ const TOOLS = [
   // stay paid. Composites orchestrate v0.9.1's primitives + compose_stack.
   {
     name: "acp_oracle_sources",
+    tier: "full",
     description:
       "List of active price-oracle source readers indexed by TheOracleBot for a given chain. Returns each source's id (chainlink | pyth | redstone | univ3_twap), display name, active flag, and a descriptive note about coverage. Use BEFORE paying for oracle-* offerings to confirm that the source(s) you need are live on the chain you care about. Free OracleBot Resource — cached 5 min.",
     inputSchema: {
@@ -1561,6 +1609,7 @@ const TOOLS = [
   },
   {
     name: "acp_oracle_drift",
+    tier: "full",
     description:
       "Cross-source price-drift incidents in the last 24 hours for a given chain. Returns `tokensWithIncidents` count + per-token incident rows. Use to answer 'what's drifted recently' or to spot tokens where on-chain price feeds have diverged. NOT cached — drift state is current; staleness would mask fresh incidents. Free OracleBot Resource.",
     inputSchema: {
@@ -1576,6 +1625,7 @@ const TOOLS = [
   },
   {
     name: "acp_oracle_capabilities",
+    tier: "full",
     description:
       "Coverage matrix for TheOracleBot's source readers. With `tokenSymbol`, returns which source readers can price that token on the given chain (`supportingSources[]` + `supported: boolean`). Without `tokenSymbol`, returns the full coverage matrix. Use to answer 'can OracleBot verify <token> on <chain>' before hiring `oracle_check`. Cached 5 min — coverage is stable. Free OracleBot Resource.",
     inputSchema: {
@@ -1595,6 +1645,7 @@ const TOOLS = [
   },
   {
     name: "acp_hire_decision",
+    tier: "core",
     description:
       "Composite hire-decision tool: runs `acp_compose_stack` to surface candidate offerings for the use case, then fetches `acp_agent_reputation` for each unique agent in parallel, then ranks the stack by a composite score (0.7 × reputation + 0.3 × inverse-price). Returns the ranked stack, a single `recommendation` (top item), and the total stack cost. Saves N+1 round trips vs. the manual flow. Sub-call count: 1 (composeStack) + uniqueAgents (reputation). Typically 4-7 calls total. Skips the heavier risk/arena legs — call `acp_agent_verify(addr)` per-candidate to drill in. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1625,6 +1676,7 @@ const TOOLS = [
   },
   {
     name: "acp_safe_quote",
+    tier: "full",
     description:
       "Composite tool: runs `acp_offering(agentAddress, offeringName)` + `acp_agent_verify(agentAddress, depth: 'lite')` in parallel and returns a merged envelope with the offering details + a unified pre-hire verdict (STRONG_BUY / OK / CAUTION / AVOID / UNKNOWN). The natural one-call answer to 'show me this offering — is the seller safe?'. Saves 1 round-trip vs. calling the two tools separately. Sub-call count: 4 (1 offering + 3 verify-lite). `depth: lite` is hardcoded — call `acp_agent_verify(addr, depth: 'full')` for the recentJobs leg. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1649,6 +1701,7 @@ const TOOLS = [
   },
   {
     name: "acp_portfolio_status",
+    tier: "full",
     description:
       "Portfolio-wide health snapshot. Probes a known-reachable free Resource on each of the 10 portfolio bots in parallel (TheMetaBot, ChainlinkBot, TheOracleBot, LiquidGuard, MEVProtect, EASIssuer, RevokeBot, ArenaBot, DeFiEval, AgentEval). Returns per-bot reachability, gateway latency, a sample response excerpt, and an aggregate `healthyCount`. Bot list is hardcoded in the MCP server — see PORTFOLIO_BOTS const. Use to answer 'is the whole portfolio up?' or to diagnose a single bot's outage during a buyer flow.",
     inputSchema: { type: "object", properties: {} }
@@ -1659,6 +1712,7 @@ const TOOLS = [
   // endpoints. Both surface third-party marketplace text → wrapUntrusted.
   {
     name: "acp_search_narrative",
+    tier: "full",
     description:
       "Claude-narrated summary of the top-5 ACP marketplace offerings matching a query. Returns a 3-5 sentence summary + 1-line 'why this ranked high' for each cited offering. Wraps TheMetaBot's $0.05 paid `searchNarrative` offering. Use when the buyer wants a human-readable explanation of WHY the ranking is what it is, not just a list of names. Sub-call count: 1 (single POST /v1/searchNarrative). Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1690,6 +1744,7 @@ const TOOLS = [
   },
   {
     name: "acp_agent_risk_check",
+    tier: "full",
     description:
       "Defensive scam-risk assessment for a single ACP agent: reputation depth + pricing outliers + wallet provenance + V1↔V2 footprint anomaly. Returns a 0-100 score + tier (low/medium/high/critical) + per-signal detail. Wraps TheMetaBot's $0.05 paid `agentRiskCheck` offering. Distinct from `acp_risk_snapshot` (which evaluates ANY EVM wallet across LiquidGuard/RevokeBot/MEVProtect/reputation lanes) — `acp_agent_risk_check` is ACP-seller-specific and tuned for the 'is this an honest seller' question. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1711,6 +1766,7 @@ const TOOLS = [
   // ===== v0.13.0 — SecurityBot patternCatalogue Resource wrapper =====
   {
     name: "acp_security_pattern",
+    tier: "full",
     description:
       "Query the ACP security catalogue (P-series + B-series) maintained by TheSecurityBot. Each pattern describes a known vulnerability class with severity (Critical/High/Medium/Low/Operational), a grep/regex detection rule, the canonical fix shipped in the portfolio, and the reference bot whose current implementation is the golden source. Use when an LLM needs to: (a) answer 'what pattern covers webhook secret encryption?' or 'show me every Critical finding', (b) guide a developer through fixing a specific pattern by ID, or (c) validate a new bot against the catalogue. The catalogue grows as new audits land — filter by severity, search by keyword, or request a single pattern by ID (the response carries the live set; don't assume a fixed count). Cached 5 min. Free SecurityBot Resource. Returned data includes marketplace-authored text in detection and canonicalFix fields — see _warning field.",
     inputSchema: {
@@ -1735,6 +1791,7 @@ const TOOLS = [
   },
   {
     name: "acp_v2_transactions",
+    tier: "core",
     description:
       "REAL V2 marketplace transactions for one agent, read from the OFFICIAL Virtuals indexer (api.acp.virtuals.io — the source behind app.virtuals.io/acp/scan/transactions), NOT TheMetaBot's homegrown scanner. Resolves the wallet to its V2 agent UUID, pages the agent's complete job history, and returns each job's {onChainJobId, role (provider=incoming sale / client=outgoing buy), jobStatus (OPEN|COMPLETED|EXPIRED|REJECTED), offering, counterparty {address,name}, budget, timestamps} plus a per-side rollup {total, completed, open, expired, rejected, completionRate}. Use to see what an agent has ACTUALLY transacted — and whether its jobs complete — before hiring; this is the canonical on-chain record, including completed jobs the cached reputation/recent-hires surfaces miss. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1750,6 +1807,7 @@ const TOOLS = [
   },
   {
     name: "acp_agent_jobs",
+    tier: "core",
     description:
       "Compact RELIABILITY rollup for an agent from the official Virtuals indexer: as-provider and as-client {total, completed, open, expired, rejected, completionRate, distinctCounterparties}. The single pre-hire number that answers 'does this agent actually complete the jobs it takes?' — derived from the canonical on-chain job record, not the cached/blind reputation surface. Cheaper than acp_v2_transactions (no per-job detail). Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1762,6 +1820,7 @@ const TOOLS = [
   },
   {
     name: "acp_v2_demand",
+    tier: "core",
     description:
       "The REAL V2 demand leaderboard: top providers ranked by genuine COMPLETED jobs, computed from the official Virtuals indexer's global activity feed (api.acp.virtuals.io/agents/activities). Answers 'who is actually getting hired and delivering on ACP right now?' — the signal Metabot's blind scanner (recent_hires/gainers) has reported as zero for months. Each row: {providerAddress, providerName, completed, distinctClients, jobsSeen}. Note: a bounded sample of recent activity (pages × 100 events); one self-loop or spam farm can dominate raw volume, so completed-by-distinct-clients is the honest read. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1775,6 +1834,7 @@ const TOOLS = [
   },
   {
     name: "acp_clone_screen",
+    tier: "core",
     description:
       "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. The jobs lane reports both externalCompleted (any non-self counterparty) and organicExternalCompleted (v0.16.2 — excludes the operator's own known portfolio wallets, so dogfooding your own fleet can't masquerade as third-party demand). A complement to the SecurityBot grade, which can't probe off-platform clones. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1787,6 +1847,7 @@ const TOOLS = [
   },
   {
     name: "acp_agent_trust",
+    tier: "core",
     description:
       "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). VERIFIED requires organicExternalCompleted >= 1 (v0.16.2) — at least one completed job from a buyer OUTSIDE the operator's own portfolio wallets — so an operator dogfooding its own fleet caps at OPERATIONAL, never VERIFIED. Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
@@ -1825,6 +1886,24 @@ const PORTFOLIO_BOTS = [
   { slug: "agenteval",       name: "AgentEval",        role: "Three-niche evaluator (trading / content / safety)",           probe: "/agenteval/v1/resources/niches"                              },
   { slug: "saferoutebot",    name: "SafeRouteBot",     role: "Non-custodial pre-trade swap safety (GO/CAUTION/BLOCK + route)", probe: "/saferoutebot/v1/resources/safeRouteStatus"                  }
 ];
+
+// --- tool tiers ------------------------------------------------------------
+const TOOL_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
+
+// CORE (default) hides the portfolio-specific / niche tools; FULL returns all.
+function toolsForTier(tier) {
+  return tier === "full" ? TOOLS : TOOLS.filter((t) => t.tier === "core");
+}
+
+// Make a tier-hidden tool non-callable, so a guessed full-only name can't be
+// dispatched on a CORE front door. Unknown names fall through to the existing
+// "Unknown tool" handling in dispatch.
+function assertToolInTier(toolName) {
+  const tool = TOOL_BY_NAME.get(toolName);
+  if (tool && tool.tier === "full" && TIER !== "full") {
+    throw new Error(`tool ${toolName} requires the full tier; set ACP_FIND_TIER=full to enable it.`);
+  }
+}
 
 // --- tool handlers ---------------------------------------------------------
 
@@ -3260,6 +3339,7 @@ logErr(`MCP server ready — gateway=${API_URL} version=${SERVER_VERSION} verbos
 export {
   TOOLS, HANDLERS, dispatchTool, validateToolArgs, withSlot, fireBootBeacon,
   SERVER_NAME, SERVER_VERSION, PROTOCOL_VERSION,
+  toolsForTier, TIER,
 };
 
 // Only start the stdio loop when run as the entry point (node server.js / the
