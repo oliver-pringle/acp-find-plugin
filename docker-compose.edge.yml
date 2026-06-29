@@ -18,6 +18,8 @@ services:
       - ACP_API_URL=https://api.acp-metabot.dev
       - EDGE_PORT=8080
       - NODE_ENV=production
+      # The remote endpoint serves the lean CORE tool surface (default; explicit here).
+      - ACP_FIND_TIER=core
     networks:
       - acp-shared
     logging:

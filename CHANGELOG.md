@@ -2,6 +2,28 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.18.0 - 2026-06-29 - Tool-surface tiering: lean CORE by default, FULL opt-in
+
+Minor - additive mechanism, but the DEFAULT tool surface for the remote endpoint and the bare npx package narrows from 47 to 20. Nothing is removed; the full surface is one env var away.
+
+### Added
+
+- **Two tiers selected by `ACP_FIND_TIER` (default `core`).** CORE = 20 trust + discovery tools (search, `acp_agent_trust`, `acp_clone_screen`, `acp_v2_transactions`, `acp_agent_jobs`, compare, compose, `acp_security_scan`, and more). FULL = all 47 (CORE plus the portfolio-specific risk / arena / oracle / safe-route / security-catalogue / power tools).
+- **`toolsForTier()`** filters `tools/list` on both transports; a gate in the shared `validateToolArgs` chokepoint makes a tier-hidden tool non-callable (a guessed full-only name returns a clear "set ACP_FIND_TIER=full" error), so CORE is a real boundary, not just a display filter.
+
+### Changed
+
+- **Default surface:** the remote endpoint (`https://api.acp-metabot.dev/mcp`) and bare `npx acp-find-mcp` now expose CORE (20). The **Claude Code plugin stays FULL** - its `.mcp.json` sets `ACP_FIND_TIER=full`, so all 38 `/acp-find:*` slash commands keep working.
+- **Boot beacon** UA now carries `tier=<core|full>` beside the transport token, so CORE vs FULL adoption is measurable.
+
+### Migration
+
+- npm / Cursor / Cline users who relied on a portfolio tool (e.g. `acp_oracle_drift`, the `acp_risk_*` family, `acp_arena_*`, `acp_safe_quote`) set `ACP_FIND_TIER=full` in their MCP server env. Nothing was removed.
+
+### Verification
+
+- Plugin `npm test` green (62 tests, incl. a new CORE-tier tools/list assertion); edge tests green (5, incl. a CORE tools/list assertion); `smoke-v0.18.0.mjs` asserts core=20 / full=47 and the dispatch gate both directions.
+
 ## v0.17.0 - 2026-06-21 - Remote MCP + one authoritative trust verdict + shareable badge
 
 Minor - additive (new output fields + a hosted transport; no existing signature changes). acp-find now has a zero-install remote endpoint, and trust is computed in exactly one place that the plugin, the website report, and the embeddable badge all share.

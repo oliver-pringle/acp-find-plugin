@@ -11,6 +11,22 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.18.0
+
+**Two tiers: a lean CORE by default, the full portfolio surface opt-in.** acp-find shipped 47
+tools, but ~27 are portfolio-specific (risk / arena / oracle / safe-route) or niche. They are
+noise to someone who just wants to search the marketplace and check whether an agent is real, and
+they bloat every client's tool context. v0.18.0 splits them.
+
+- **CORE (20)** is the default for the remote endpoint (`https://api.acp-metabot.dev/mcp`) and the
+  bare `npx acp-find-mcp` install: search, trust verdict, clone screen, real V2 transactions, agent
+  jobs, compare, compose, security scan. The trust + discovery spine, nothing else.
+- **FULL (47)** is CORE plus the portfolio tools. Opt in with `ACP_FIND_TIER=full`.
+- **The Claude Code plugin stays FULL** (its `.mcp.json` sets the flag), so all 38 `/acp-find:*`
+  slash commands keep working.
+- **Migration:** npm / Cursor / Cline users who relied on a portfolio tool (e.g. `acp_oracle_drift`,
+  the `acp_risk_*` family) set `ACP_FIND_TIER=full` in their MCP server env. Nothing was removed.
+
 ## What's new in v0.17.0
 
 **Remote MCP, one authoritative trust verdict, and a shareable badge.** Add acp-find by URL -

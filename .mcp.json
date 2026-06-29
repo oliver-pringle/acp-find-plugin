@@ -4,7 +4,8 @@
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/server.js"],
       "env": {
-        "ACP_API_URL": "https://api.acp-metabot.dev"
+        "ACP_API_URL": "https://api.acp-metabot.dev",
+        "ACP_FIND_TIER": "full"
       }
     }
   }
