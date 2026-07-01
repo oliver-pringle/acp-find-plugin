@@ -11,6 +11,25 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.18.1
+
+**A mutual-boost farm can no longer mint VERIFIED.** The V2 marketplace now has an active
+wash-trade economy - agents trading $0.001-0.01 `mutual_boost` / `boost_reciprocal` pings to
+manufacture hire and completion counts. One such farm buying a portfolio offering on a ~4h loop
+was enough to flip an agent's trust verdict to VERIFIED on volume alone. v0.18.1 closes that:
+
+- `acp_clone_screen` / `acp_agent_trust` now subtract **boost-farm buyers** from
+  `organicExternalCompleted` and `organicDistinctBuyers`, alongside the existing operator-wallet
+  exclusion. A farm is caught by a **seed list** of confirmed farms plus a **sell-side heuristic**
+  (does the buyer itself sell `mutual_boost` / `boost_reciprocal` / buyback offerings?), so new
+  farms are detected automatically. The check is deliberately narrow - a plain "yield boost" or
+  "MEV boost" offering is NOT flagged.
+- New transparency fields on the delivery lane: `organicExternalCompletedRaw` (pre-filter),
+  `boostExcludedCount`, and `boostFarmBuyers[]`. `organicExternalCompleted` is now the honest,
+  farm-stripped count the VERIFIED gate reads.
+- No tool signatures changed and nothing was removed - the organic-demand count is simply harder
+  to game.
+
 ## What's new in v0.18.0
 
 **Two tiers: a lean CORE by default, the full portfolio surface opt-in.** acp-find shipped 47

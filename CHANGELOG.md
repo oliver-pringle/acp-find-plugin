@@ -2,6 +2,24 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.18.1 - 2026-07-01 - Boost-farm exclusion: a wash-trade farm can't mint VERIFIED
+
+Patch - additive fields plus a correctness tightening of `organicExternalCompleted` (it now excludes mutual-boost farm buyers). No tool added or removed; no signature changed.
+
+### Added
+
+- **Boost-farm exclusion in `acp_clone_screen` / `acp_agent_trust`.** Completions bought by a mutual-boost / wash-trade farm are subtracted from `organicExternalCompleted` and `organicDistinctBuyers` (alongside the existing operator-wallet exclusion), so a farm buying an offering on a loop can no longer mint VERIFIED. Detection = a seed list of confirmed farms (`BOOST_FARM_WALLETS`) + a sell-side heuristic (`offeringsLookBoosty` - does the buyer itself sell `mutual_boost` / `boost_reciprocal` / buyback products?), cached per wallet (5-min TTL), fail-open. Deliberately narrow: a plain "yield boost" / "MEV boost" offering is not flagged.
+- **Transparency fields** on the clone-screen jobs object + trust delivery lane: `organicExternalCompletedRaw` (pre-filter), `boostExcludedCount`, `boostFarmBuyers[]`; plus a weight-0 `boost_farm_buyers` clone signal (informational - being bought by a farm does not make YOU a clone).
+
+### Changed
+
+- **`organicExternalCompleted` semantics tightened** to exclude boost-farm buyers. Field name + type unchanged; the value is now the honest third-party count the VERIFIED gate reads. Motivating case: RoFlo R25 found MicroCoord2.ai (a mutual-boost farm) had inflated TheMetaBot's verdict to VERIFIED via ~26 looped `agentRiskCheck` buys.
+
+### Verification
+
+- `npm test` green (66 tests, +4: `offeringsLookBoosty` positives/negatives, `BOOST_FARM_WALLETS` seed, farm-only-agent -> OPERATIONAL regression).
+- The authoritative edge (`api.acp-metabot.dev/trust/:addr` + `/mcp`) imports `server.js`, so the website report + badge + Metabot trustProof inherit the honest count on redeploy.
+
 ## v0.18.0 - 2026-06-29 - Tool-surface tiering: lean CORE by default, FULL opt-in
 
 Minor - additive mechanism, but the DEFAULT tool surface for the remote endpoint and the bare npx package narrows from 47 to 20. Nothing is removed; the full surface is one env var away.

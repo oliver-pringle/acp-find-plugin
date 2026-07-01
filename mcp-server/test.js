@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { computeTrustVerdict, computeTrustScore, latestSecurityRow } from "./server.js";
+import { computeTrustVerdict, computeTrustScore, latestSecurityRow, offeringsLookBoosty, BOOST_FARM_WALLETS } from "./server.js";
 import * as server from "./server.js";
 
 // Spin up a one-shot HTTP stub gateway. Returns { url, close, requestLog }.
@@ -240,6 +240,34 @@ test("computeTrustVerdict - UNKNOWN when found is false", () => {
   const r = computeTrustVerdict({ clone: {}, security: {}, reputation: {}, found: false });
   assert.equal(r.verdict, "UNKNOWN");
   assert.equal(r.score, 0);
+});
+
+// --- v0.18.1 boost-farm exclusion ---
+test("offeringsLookBoosty - flags mutual-boost / reciprocal / buyback / orchestrator products", () => {
+  assert.equal(offeringsLookBoosty([{ offeringName: "mutual_boost_x5" }]), true);
+  assert.equal(offeringsLookBoosty([{ offeringName: "boost_reciprocal_nano" }]), true);
+  assert.equal(offeringsLookBoosty([{ offeringName: "agent_boost_orchestrator" }]), true);
+  assert.equal(offeringsLookBoosty([{ offeringName: "Test 3", description: "test endpoint for agent validation, smoke testing, and mutual-boost buyback loops" }]), true);
+});
+
+test("offeringsLookBoosty - does NOT flag legitimate 'boost' offerings (no false positives)", () => {
+  assert.equal(offeringsLookBoosty([{ offeringName: "yield_boost", description: "boost your staking APY" }]), false);
+  assert.equal(offeringsLookBoosty([{ offeringName: "mev_score", description: "MEV boost protection scoring" }]), false);
+  assert.equal(offeringsLookBoosty([{ offeringName: "oracle_check", description: "cross-source price deviation" }]), false);
+  assert.equal(offeringsLookBoosty([]), false);
+});
+
+test("BOOST_FARM_WALLETS - seed includes the confirmed MicroCoord2.ai farm", () => {
+  assert.ok(BOOST_FARM_WALLETS.has("0x0765db1e63830b3cfaca75b9d13e649a4dc5b08c"));
+});
+
+test("computeTrustVerdict - a boost-farm-only agent cannot mint VERIFIED (organic farm-stripped to 0)", () => {
+  // After the v0.18.1 filter, a completion bought by a boost farm is excluded from
+  // organicExternalCompleted. An agent whose ONLY external completions were farm buys
+  // presents organicExternalCompleted=0 -> OPERATIONAL, never VERIFIED. This is the
+  // regression guard for RoFlo R25 (MicroCoord2.ai had inflated TheMetaBot to VERIFIED).
+  const r = computeTrustVerdict({ clone: { verdict: "CLEAN", externalCompleted: 26, organicExternalCompleted: 0 }, security: { status: "scanned", score: 90 }, reputation: {} });
+  assert.equal(r.verdict, "OPERATIONAL");
 });
 
 test("computeTrustVerdict - found omitted keeps back-compat (no UNKNOWN)", () => {

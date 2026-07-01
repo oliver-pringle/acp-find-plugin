@@ -336,6 +336,57 @@ const PORTFOLIO_WALLETS = new Set([
   "0xa3d8834dc34b2f2e818a4a71074a453b4b77529b", // MetabotTester (buyer dogfood)
 ]);
 
+// Known mutual-boost / wash-trade farms (lowercase). A "completion" bought by one of
+// these is NOT organic demand - it is the V2 boost economy (agents trading $0.001-0.01
+// mutual_boost / boost_reciprocal pings to manufacture hire/completion counts). Subtracted
+// from organicExternalCompleted alongside PORTFOLIO_WALLETS so a farm cannot mint VERIFIED
+// (RoFlo R25: MicroCoord2.ai's 24x agentRiskCheck loop had inflated TheMetaBot to VERIFIED).
+// Seed = confirmed farms 2026-06-30; NEW farms are caught heuristically by walletLooksBoostFarm.
+const BOOST_FARM_WALLETS = new Set([
+  "0x0765db1e63830b3cfaca75b9d13e649a4dc5b08c", // MicroCoord2.ai (Test/mutual-boost buyback loops)
+  "0x9c873c30e60099ba576dd24a843f9103f5c36f8d", // Friday (mutual_boost_partner_nano / agent_boost_orchestrator)
+  "0x46dcd6e08549237097e4da30f531fffd344a0b59", // Connectouch Agent (mutual_boost_x5)
+  "0xadda12d0304195a379709198313b57212e7049b9", // scepp Agent (Mutual Boost)
+  "0x4022e163ec6e2196b6fc422eb48b86959f637a5a", // Layla (boost_reciprocal_nano)
+]);
+
+// An offering set "looks boosty" if it sells a mutual-boost / reciprocal / buyback product.
+// Deliberately NARROW: a plain "boost" (yield boost, MEV boost) must NOT match - only boost
+// paired with mutual / reciprocal / buyback / partner / orchestrator / loop.
+const BOOST_OFFERING_RE = /mutual[\s_-]?boost|boost[\s_-]?reciprocal|reciprocal[\s_-]?boost|boost[\s_-]?(?:buyback|partner|orchestrator|loop)|\bboost\b[^.]{0,24}\b(?:buyback|reciprocal|mutual)\b/i;
+function offeringsLookBoosty(offerings) {
+  return (Array.isArray(offerings) ? offerings : []).some((o) => {
+    const t = `${o?.offeringName ?? o?.name ?? ""} ${o?.description ?? ""}`;
+    return BOOST_OFFERING_RE.test(t);
+  });
+}
+
+// Heuristic boost-farm detector for a BUYER wallet: does it SELL boost offerings?
+// One cached profile fetch (5-min TTL). Fail-open - a transient error must NOT wrongly
+// strip a real buyer's completion. `safe` is the caller's error-swallowing runner.
+async function walletLooksBoostFarm(addr, safe) {
+  const key = `boostfarm:${addr}`;
+  const cached = cacheGet(key);
+  if (cached) return !!cached.boost;
+  const run = safe ?? (async (fn) => { try { return await fn(); } catch { return null; } });
+  const profile = await run(() => callGateway(`/v1/agent/${encodeURIComponent(addr)}`, undefined, "GET"));
+  const boost = offeringsLookBoosty(profile?.offerings);
+  cachePut(key, { boost });
+  return boost;
+}
+
+// Given candidate organic-buyer addresses, return the subset that are boost-farms
+// (seed list OR heuristic). Heuristic runs only for non-seed addresses, in parallel.
+async function classifyBoostBuyers(addrs, safe) {
+  const out = new Set();
+  await Promise.all((addrs || []).map(async (a) => {
+    const addr = String(a).toLowerCase();
+    if (BOOST_FARM_WALLETS.has(addr)) { out.add(addr); return; }
+    if (await walletLooksBoostFarm(addr, safe)) out.add(addr);
+  }));
+  return out;
+}
+
 // 0-100 advisory colour. The verdict cascade is the load-bearing output.
 function computeTrustScore({ clone, security, reputation }) {
   let score = 50;
@@ -384,7 +435,7 @@ function computeTrustVerdict({ clone, security, reputation, found }) {
   return { verdict, score: verdict === "UNKNOWN" ? 0 : computeTrustScore({ clone, security, reputation }) };
 }
 
-export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks };
+export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks, offeringsLookBoosty, BOOST_FARM_WALLETS };
 
 // --- SSRF guard --------------------------------------------------------------
 // Blocks acp_resource_call from being weaponised into a request-from-MCP-host
@@ -1836,7 +1887,7 @@ const TOOLS = [
     name: "acp_clone_screen",
     tier: "core",
     description:
-      "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. The jobs lane reports both externalCompleted (any non-self counterparty) and organicExternalCompleted (v0.16.2 — excludes the operator's own known portfolio wallets, so dogfooding your own fleet can't masquerade as third-party demand). A complement to the SecurityBot grade, which can't probe off-platform clones. Returned data includes third-party marketplace text — see _warning field.",
+      "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. The jobs lane reports both externalCompleted (any non-self counterparty) and organicExternalCompleted (v0.16.2 — excludes the operator's own known portfolio wallets; v0.18.1 ALSO excludes mutual-boost/wash-trade farm buyers via a seed list + a sell-side heuristic, so neither dogfooding nor a boost farm buying your offering on a loop can masquerade as third-party demand; boostExcludedCount reports how many were stripped). A complement to the SecurityBot grade, which can't probe off-platform clones. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1849,7 +1900,7 @@ const TOOLS = [
     name: "acp_agent_trust",
     tier: "core",
     description:
-      "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). VERIFIED requires organicExternalCompleted >= 1 (v0.16.2) — at least one completed job from a buyer OUTSIDE the operator's own portfolio wallets — so an operator dogfooding its own fleet caps at OPERATIONAL, never VERIFIED. Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). Returned data includes third-party marketplace text — see _warning field.",
+      "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). VERIFIED requires organicExternalCompleted >= 1 (v0.16.2) — at least one completed job from a buyer OUTSIDE the operator's own portfolio wallets — so an operator dogfooding its own fleet caps at OPERATIONAL, never VERIFIED. (v0.18.1) mutual-boost/wash-trade farm buyers are excluded from that count too, so a boost farm buying your offering on a loop cannot mint VERIFIED. Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3137,11 +3188,19 @@ const HANDLERS = {
       const ext = prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED" && j.counterparty?.address && j.counterparty.address !== wallet);
       // Organic = external completions whose counterparty is NOT one of the
       // operator's own portfolio/Tester wallets — the honest third-party signal.
-      const organic = ext.filter((j) => !PORTFOLIO_WALLETS.has(String(j.counterparty.address).toLowerCase()));
+      const organicRaw = ext.filter((j) => !PORTFOLIO_WALLETS.has(String(j.counterparty.address).toLowerCase()));
+      // ...and NOT a mutual-boost / wash-trade farm (v0.18.1): a farm buying your offering
+      // on a loop is manufactured volume, not organic demand, and must not mint VERIFIED
+      // (RoFlo R25 - MicroCoord2.ai's agentRiskCheck loop had inflated TheMetaBot).
+      const rawBuyers = [...new Set(organicRaw.map((j) => String(j.counterparty.address).toLowerCase()))];
+      const boostBuyers = await classifyBoostBuyers(rawBuyers, safe);
+      const organic = organicRaw.filter((j) => !boostBuyers.has(String(j.counterparty.address).toLowerCase()));
       // Distinct organic buyers — "96 completions from 1 buyer" is not the same demand
       // signal as "96 from 50". Surfaced in the trust delivery lane + headline (v0.16.3).
       const organicBuyers = new Set(organic.map((j) => String(j.counterparty.address).toLowerCase()));
-      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length, organicDistinctBuyers: organicBuyers.size };
+      const boostExcludedCount = organicRaw.length - organic.length;
+      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length, organicDistinctBuyers: organicBuyers.size, organicExternalCompletedRaw: organicRaw.length, boostExcludedCount, boostFarmBuyers: [...boostBuyers].slice(0, 10) };
+      if (boostExcludedCount > 0) signals.push({ signal: "boost_farm_buyers", detail: { excluded: boostExcludedCount, buyers: [...boostBuyers].slice(0, 6) }, weight: 0 });
       // Only meaningful as a clone tell alongside bulk offerings — a legit new
       // bot with only internal/dogfood completions is NOT suspicious on its own.
       if (jobs.total >= 1 && jobs.externalCompleted === 0 && offerings.length >= 30) {
@@ -3207,6 +3266,7 @@ const HANDLERS = {
     reasons.push(clone.organicExternalCompleted >= 1
       ? `${clone.organicExternalCompleted} organic completion(s) from ${clone.organicDistinctBuyers} buyer(s)`
       : (clone.externalCompleted >= 1 ? `${clone.externalCompleted} completion(s), none organic (portfolio/dogfood)` : "no external completions"));
+    if ((Number(cloneJobs?.boostExcludedCount) || 0) > 0) reasons.push(`${cloneJobs.boostExcludedCount} boost-farm completion(s) excluded`);
 
     return wrapUntrusted({
       agentAddress: wallet,
@@ -3218,7 +3278,7 @@ const HANDLERS = {
       lanes: {
         authenticity: cloneRes?.error ? { error: cloneRes.error } : { verdict: cloneRes?.verdict, score: cloneRes?.score, signals: cloneRes?.signals },
         auditability: histRes?.error ? { error: histRes.error } : { status: security.status, grade: security.grade, score: security.score, scannedAt: secRow?.scannedAt ?? null },
-        delivery: cloneRes?.error ? { error: cloneRes.error } : { organicExternalCompleted: clone.organicExternalCompleted, organicDistinctBuyers: clone.organicDistinctBuyers, externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
+        delivery: cloneRes?.error ? { error: cloneRes.error } : { organicExternalCompleted: clone.organicExternalCompleted, organicDistinctBuyers: clone.organicDistinctBuyers, boostExcludedCount: Number(cloneJobs?.boostExcludedCount) || 0, externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
         reputation: repRes?.error ? { error: repRes.error } : { agentScore: reputation?.agentScore ?? reputation?.score ?? null },
       },
       note: "Trust heuristic, not a guarantee — pair with acp_security_scan for a full audit.",
