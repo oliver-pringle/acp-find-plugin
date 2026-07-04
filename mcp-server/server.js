@@ -348,6 +348,10 @@ const BOOST_FARM_WALLETS = new Set([
   "0x46dcd6e08549237097e4da30f531fffd344a0b59", // Connectouch Agent (mutual_boost_x5)
   "0xadda12d0304195a379709198313b57212e7049b9", // scepp Agent (Mutual Boost)
   "0x4022e163ec6e2196b6fc422eb48b86959f637a5a", // Layla (boost_reciprocal_nano)
+  // RoFlo R26 (2026-07-04): named e2e-test-loop buyers - single-offering bursts that
+  // pass clone_screen CLEAN. Also caught heuristically by nameLooksTestHarness.
+  "0x72e1a2a350d9640d9d9abceece32713a781923b5", // "acp-e2e-buyer" (DataPort Arena sole buyer, 5 jobs/24min)
+  "0x24c168db8aefbe14d24110abdcc11f502e182fec", // "TestAgent" (ArAIstotle sole buyer, 6x factCheck)
 ]);
 
 // An offering set "looks boosty" if it sells a mutual-boost / reciprocal / buyback product.
@@ -361,27 +365,58 @@ function offeringsLookBoosty(offerings) {
   });
 }
 
-// Heuristic boost-farm detector for a BUYER wallet: does it SELL boost offerings?
-// One cached profile fetch (5-min TTL). Fail-open - a transient error must NOT wrongly
-// strip a real buyer's completion. `safe` is the caller's error-swallowing runner.
+// A BUYER agent name "looks like a test harness" if it matches an anchored e2e /
+// test-agent pattern (RoFlo R26: DataPort's "acp-e2e-buyer", ArAIstotle's "TestAgent"
+// ran single-offering burst loops that passed clone_screen). Deliberately NARROW to
+// avoid false-positives: bare "test"/"mock"/"sandbox"/"staging" must NOT match - only
+// the compound harness forms + the very-specific "e2e" token.
+const TEST_HARNESS_RE = /\b(?:e2e|end[\s_-]?to[\s_-]?end)\b|\btest[\s_-]?(?:agent|buyer|harness|bot|runner|client)\b|\bsmoke[\s_-]?test\b|\b(?:qa|ci)[\s_-]?(?:buyer|runner|bot)\b|\bacp[\s_-]?e2e\b/i;
+function nameLooksTestHarness(name) {
+  return TEST_HARNESS_RE.test(String(name ?? ""));
+}
+
+// Heuristic wash-buyer detector for a BUYER wallet: does it SELL a boost product, OR
+// is its agent name a test harness (v0.18.2 - e2e-test-loop buyers that pass
+// clone_screen)? One cached profile fetch (5-min TTL). Fail-open - a transient error
+// must NOT wrongly strip a real buyer's completion. `safe` is the caller's runner.
 async function walletLooksBoostFarm(addr, safe) {
   const key = `boostfarm:${addr}`;
   const cached = cacheGet(key);
   if (cached) return !!cached.boost;
   const run = safe ?? (async (fn) => { try { return await fn(); } catch { return null; } });
   const profile = await run(() => callGateway(`/v1/agent/${encodeURIComponent(addr)}`, undefined, "GET"));
-  const boost = offeringsLookBoosty(profile?.offerings);
+  const boost = offeringsLookBoosty(profile?.offerings) || nameLooksTestHarness(profile?.agentName ?? profile?.name);
   cachePut(key, { boost });
   return boost;
 }
 
-// Given candidate organic-buyer addresses, return the subset that are boost-farms
-// (seed list OR heuristic). Heuristic runs only for non-seed addresses, in parallel.
+// Convergence (v0.18.2): the authoritative farm-seed list lives on the gateway
+// (GET /v1/resources/farmWallets -> { farmSeeds: [...] }). Union it into the frozen
+// BOOST_FARM_WALLETS so a farm added on the gateway reaches every install without an
+// npm republish. Cached (5-min TTL); FAIL-OPEN to the frozen seed on any error.
+async function effectiveFarmSeeds(safe) {
+  const key = "farmseeds:gateway";
+  let extra = cacheGet(key);
+  if (!extra) {
+    const run = safe ?? (async (fn) => { try { return await fn(); } catch { return null; } });
+    const res = await run(() => callGateway("/v1/resources/farmWallets", undefined, "GET"));
+    const list = Array.isArray(res?.farmSeeds) ? res.farmSeeds : [];
+    extra = { seeds: list.map((w) => String(w).toLowerCase()) };
+    cachePut(key, extra);
+  }
+  const set = new Set(BOOST_FARM_WALLETS);
+  for (const w of extra.seeds) set.add(w);
+  return set;
+}
+
+// Given candidate organic-buyer addresses, return the subset that are wash buyers
+// (effective seed list OR heuristic). Heuristic runs only for non-seed addresses.
 async function classifyBoostBuyers(addrs, safe) {
   const out = new Set();
+  const seeds = await effectiveFarmSeeds(safe);
   await Promise.all((addrs || []).map(async (a) => {
     const addr = String(a).toLowerCase();
-    if (BOOST_FARM_WALLETS.has(addr)) { out.add(addr); return; }
+    if (seeds.has(addr)) { out.add(addr); return; }
     if (await walletLooksBoostFarm(addr, safe)) out.add(addr);
   }));
   return out;
@@ -435,7 +470,7 @@ function computeTrustVerdict({ clone, security, reputation, found }) {
   return { verdict, score: verdict === "UNKNOWN" ? 0 : computeTrustScore({ clone, security, reputation }) };
 }
 
-export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks, offeringsLookBoosty, BOOST_FARM_WALLETS };
+export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks, offeringsLookBoosty, nameLooksTestHarness, TEST_HARNESS_RE, BOOST_FARM_WALLETS };
 
 // --- SSRF guard --------------------------------------------------------------
 // Blocks acp_resource_call from being weaponised into a request-from-MCP-host

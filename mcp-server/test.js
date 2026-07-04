@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { computeTrustVerdict, computeTrustScore, latestSecurityRow, offeringsLookBoosty, BOOST_FARM_WALLETS } from "./server.js";
+import { computeTrustVerdict, computeTrustScore, latestSecurityRow, offeringsLookBoosty, nameLooksTestHarness, BOOST_FARM_WALLETS } from "./server.js";
 import * as server from "./server.js";
 
 // Spin up a one-shot HTTP stub gateway. Returns { url, close, requestLog }.
@@ -259,6 +259,30 @@ test("offeringsLookBoosty - does NOT flag legitimate 'boost' offerings (no false
 
 test("BOOST_FARM_WALLETS - seed includes the confirmed MicroCoord2.ai farm", () => {
   assert.ok(BOOST_FARM_WALLETS.has("0x0765db1e63830b3cfaca75b9d13e649a4dc5b08c"));
+});
+
+// --- v0.18.2 e2e-test-loop wash detector ---
+test("BOOST_FARM_WALLETS - seed includes the R26 e2e-test-loop buyers", () => {
+  assert.ok(BOOST_FARM_WALLETS.has("0x72e1a2a350d9640d9d9abceece32713a781923b5")); // acp-e2e-buyer
+  assert.ok(BOOST_FARM_WALLETS.has("0x24c168db8aefbe14d24110abdcc11f502e182fec")); // TestAgent
+});
+
+test("nameLooksTestHarness - flags named e2e / test-agent buyers", () => {
+  assert.equal(nameLooksTestHarness("acp-e2e-buyer"), true);
+  assert.equal(nameLooksTestHarness("TestAgent"), true);
+  assert.equal(nameLooksTestHarness("smoke-test buyer"), true);
+  assert.equal(nameLooksTestHarness("QA Runner"), true);
+  assert.equal(nameLooksTestHarness("end-to-end tester"), true);
+});
+
+test("nameLooksTestHarness - does NOT flag legit names containing 'test'/'sandbox' (no false positives)", () => {
+  assert.equal(nameLooksTestHarness("Contest Winner"), false);
+  assert.equal(nameLooksTestHarness("Latest Alpha"), false);
+  assert.equal(nameLooksTestHarness("Sandbox Finance"), false);
+  assert.equal(nameLooksTestHarness("Test-driven Value"), false);
+  assert.equal(nameLooksTestHarness("DataPort Arena"), false);
+  assert.equal(nameLooksTestHarness(""), false);
+  assert.equal(nameLooksTestHarness(null), false);
 });
 
 test("computeTrustVerdict - a boost-farm-only agent cannot mint VERIFIED (organic farm-stripped to 0)", () => {

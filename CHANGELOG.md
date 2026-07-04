@@ -2,6 +2,28 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.18.2 - 2026-07-04 - e2e-test-loop wash detector
+
+Patch - additive. Extends the v0.18.1 wash filter to the named e2e-test-loop economy that passes `clone_screen`. No tool added or removed; no signature changed.
+
+### Added
+
+- **e2e-test-loop exclusion in `acp_clone_screen` / `acp_agent_trust`.** A buyer whose agent name matches an anchored test-harness pattern (`nameLooksTestHarness` / `TEST_HARNESS_RE` - `e2e`, `test-agent`, `smoke-test`, `qa-buyer`, ...) is excluded from `organicExternalCompleted` alongside the existing boost-farm and operator-wallet exclusions. Deliberately narrow to avoid false-positives (bare "test" / "sandbox" / "staging" do not match). Motivating case: RoFlo R26 found DataPort Arena's sole buyer "acp-e2e-buyer" (5 jobs / 24 min) and ArAIstotle's "TestAgent" (6x factCheck) topping the V2 demand leaderboard while passing clone_screen CLEAN.
+- **Seed** of the two confirmed e2e-loop buyers (`acp-e2e-buyer` `0x72e1...23b5`, `TestAgent` `0x24c1...2fec`).
+- **Farm-seed convergence.** The plugin now fetches the gateway's authoritative farm-seed list (`GET /v1/resources/farmWallets`) and unions it into the frozen `BOOST_FARM_WALLETS`, cached (5-min TTL), fail-open - so a farm added on the gateway reaches every install without an npm republish.
+
+### Changed
+
+- **`boostExcludedCount` coverage broadened** to also count test-harness buyers (its meaning - wash buyers excluded from organic - is unchanged; field name + type unchanged).
+
+### Gateway (ACP_Metabot, deployed separately)
+
+- The same name heuristic + seed land in the authoritative gateway path (`FarmWalletRegistry.NameLooksTestHarness`, folded into `CorpusBoostyLookup`, seeded in `appsettings.json`), so the website trust report, the by-address badge, and the Arrival Sentinel converge on the same honest count.
+
+### Verification
+
+- Plugin: `node --check server.js` + `npm test` (69 tests, incl. new harness match/no-match boundary cases). Gateway: `dotnet test` (FarmWalletRegistry / TrustSignals / ArrivalSentinel green, 63 tests). Regex kept byte-identical between `server.js` and `FarmWalletRegistry.cs`.
+
 ## v0.18.1 - 2026-07-01 - Boost-farm exclusion: a wash-trade farm can't mint VERIFIED
 
 Patch - additive fields plus a correctness tightening of `organicExternalCompleted` (it now excludes mutual-boost farm buyers). No tool added or removed; no signature changed.

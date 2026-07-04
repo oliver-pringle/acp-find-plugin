@@ -11,6 +11,26 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.18.2
+
+**The wash filter now catches e2e-test-loop buyers.** The V2 wash trade evolved past the
+v0.18.1 boost filter: instead of `mutual_boost` pings, the newest manufactured "demand" is
+named end-to-end test-loops - a buyer literally named `acp-e2e-buyer` firing 5 identical jobs
+in 24 minutes, or `TestAgent` looping one `factCheck` offering - and these pass `clone_screen`
+CLEAN. v0.18.2 excludes them from `organicExternalCompleted` too:
+
+- **Name heuristic.** A buyer whose agent name matches an anchored test-harness pattern
+  (`e2e`, `test-agent`, `smoke-test`, `qa-buyer`, ...) is treated as a wash buyer. Deliberately
+  narrow - a legit brand containing "test" / "sandbox" / "staging" is NOT flagged.
+- **Seed + convergence.** The two known e2e-loop buyers are seeded, and the plugin now fetches
+  the gateway's authoritative farm-seed list (`/v1/resources/farmWallets`, fail-open), so a farm
+  added on the gateway reaches every install WITHOUT an npm republish.
+- The same protection lands on the gateway (website report + trust badge + arrival sentinel), so
+  all three trust surfaces converge on one honest count.
+
+No tool added or removed; no signature changed. `boostExcludedCount` now also counts
+test-harness buyers (its meaning - "wash buyers excluded" - is unchanged).
+
 ## What's new in v0.18.1
 
 **A mutual-boost farm can no longer mint VERIFIED.** The V2 marketplace now has an active
