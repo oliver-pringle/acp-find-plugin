@@ -11,6 +11,39 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.19.0
+
+**Three structural wash detectors close the gen-3 blind spots.** The V2 wash trade evolved
+again past the v0.18.x seed + name filters. Two live patterns proved it: a **reciprocal
+metronome pair** (VEGETA and iCLONE, each the other's ONLY counterparty, 49/49 completed at
+`$0.05` every ~10 min — they topped `acp_v2_demand` and read as 50 "organic" completions with
+`boostExcludedCount=0`), and an **operator name-family** (a seller bought only by "Tasty" and
+"taster", reported as 2 organic buyers). v0.19.0 catches both structurally, plus the
+single-buyer burst:
+
+- **Reciprocal-pair wash.** `acp_clone_screen` / `acp_agent_trust` now strip a buyer that sells
+  (almost) exclusively BACK to the screened agent — a mutual-boost partner, not demand. Detected
+  structurally (a bounded, fail-open per-buyer probe), so a *new* pair with a clean catalogue is
+  caught without a seed. `acp_v2_demand` flags reciprocal rows too.
+- **Name-family wash.** A buyer whose agent name is NEAR-IDENTICAL to the seller's — the same
+  base name differing only in a short suffix (Taste/Tasty/taster) — is treated as an operator
+  companion wallet. Deliberately narrow: an adversarial review measured that broader
+  acronym/shared-token matching false-positived on legitimate same-vertical agents (a "* Video *"
+  buying from a "* Video *", `AlphaGuard` vs `AlphaBot`), so only the near-identical case is used.
+- **Single-buyer burst.** `>=20` organic completions from exactly ONE buyer hard-caps the clone
+  verdict at `SUSPICIOUS`. The `>=20` floor is above the one honest organic signal in the
+  marketplace (4 completions from a single real buyer stays VERIFIED) and below every observed
+  wash burst (25, 27, 33, 49, 50, 91).
+- **`acp_v2_demand`** now emits `washLikely` + `washReasons`
+  (`reciprocal_pair | single_buyer | farm_seed | test_harness_name`) per provider row, plus a
+  `washSummary`, so the demand leaderboard is decision-grade.
+- **Four new farm seeds** (VEGETA, iCLONE, the gitlawb-test-buyer, and the Producer/Suede burst
+  wallet), served via the gateway `farmWallets` Resource so they reach every install without a
+  republish.
+
+No tool added or removed; no signature changed. All new response fields are additive. The one
+honest organic buyer in the current marketplace is provably preserved (regression-tested).
+
 ## What's new in v0.18.2
 
 **The wash filter now catches e2e-test-loop buyers.** The V2 wash trade evolved past the

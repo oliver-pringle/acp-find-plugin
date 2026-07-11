@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { computeTrustVerdict, computeTrustScore, latestSecurityRow, offeringsLookBoosty, nameLooksTestHarness, BOOST_FARM_WALLETS } from "./server.js";
+import { computeTrustVerdict, computeTrustScore, latestSecurityRow, offeringsLookBoosty, nameLooksTestHarness, BOOST_FARM_WALLETS, namesAreAffine, isSingleBuyerBurst, classifyDemandRowWash, SINGLE_BUYER_MIN, cloneVerdictFromSignals } from "./server.js";
 import * as server from "./server.js";
 
 // Spin up a one-shot HTTP stub gateway. Returns { url, close, requestLog }.
@@ -283,6 +283,114 @@ test("nameLooksTestHarness - does NOT flag legit names containing 'test'/'sandbo
   assert.equal(nameLooksTestHarness("DataPort Arena"), false);
   assert.equal(nameLooksTestHarness(""), false);
   assert.equal(nameLooksTestHarness(null), false);
+});
+
+// --- v0.19 wash gen-3 detectors (reciprocal-pair / single-buyer / name-affinity) ---
+test("BOOST_FARM_WALLETS - seed includes the R27 reciprocal + burst wash wallets", () => {
+  assert.ok(BOOST_FARM_WALLETS.has("0xe09f40114af6c78788a8003da127c49c56158584")); // VEGETA
+  assert.ok(BOOST_FARM_WALLETS.has("0x44cc25d55a4291b92f52062ba023ca1f14206664")); // iCLONE
+  assert.ok(BOOST_FARM_WALLETS.has("0xec6ff51b394f6cda716b84b87e6b260331935627")); // gitlawb-test-buyer
+  assert.ok(BOOST_FARM_WALLETS.has("0xbdaa681f63dc45cf2575038a045ef73d1116cf2c")); // Producer/Suede burst
+  // REGRESSION GUARD: the one honest organic buyer (Gitlawb_Mercenary) must NEVER be seeded.
+  assert.equal(BOOST_FARM_WALLETS.has("0xc1b92a5c6de2aee7ad7388b49f276a71802a3ed6"), false);
+});
+
+test("namesAreAffine - flags NEAR-IDENTICAL operator-family names (R27: Taste/Tasty/taster)", () => {
+  assert.equal(namesAreAffine("Taste", "Tasty"), true);        // differ in last char
+  assert.equal(namesAreAffine("Taste", "taster"), true);       // short suffix add
+  assert.equal(namesAreAffine("AlphaBot", "AlphaBotV2"), true); // same base + short suffix
+  assert.equal(namesAreAffine("Nova", "Nova"), true);          // identical
+});
+
+test("namesAreAffine - does NOT flag unrelated brands (v0.19 review: no intra-vertical FPs)", () => {
+  // honest buyers from the census must survive
+  assert.equal(namesAreAffine("TheMetaBot", "Gitlawb_Mercenary"), false);
+  assert.equal(namesAreAffine("ZeroAgent", "Whitepaper Grey"), false);
+  assert.equal(namesAreAffine("ZeroAgent", "Vibe Earn Agent"), false);
+  assert.equal(namesAreAffine("ZeroAgent", "Mason"), false);
+  // the empirical false-positives the reduced (near-identical-only) rule must REJECT
+  assert.equal(namesAreAffine("AlphaGuard", "AlphaBot"), false);
+  assert.equal(namesAreAffine("Crypto Alpha", "Crypto Beta"), false);
+  assert.equal(namesAreAffine("Wallet Guardian", "Wallet Tracker"), false);
+  assert.equal(namesAreAffine("Solana Sniper", "Solana Sentinel"), false);
+  assert.equal(namesAreAffine("Portfolio Manager", "Portfolio Tracker"), false);
+  assert.equal(namesAreAffine("Arcads UGC Video Seller", "Seedance Video Gen Agent"), false); // shared vertical word
+  assert.equal(namesAreAffine("BaseSwap Oracle", "Base Analytics Security Engine"), false);    // acronym coincidence
+  assert.equal(namesAreAffine("Trading Agent", "Research Agent"), false);
+  // the weaker forms are DELIBERATELY ceded (documented scope reduction) - must be false now
+  assert.equal(namesAreAffine("BitsAndBytesBack", "BABBS_API"), false);
+  assert.equal(namesAreAffine("Producer by Suede Labs", "Johnny Suede"), false);
+  assert.equal(namesAreAffine("", "anything"), false);
+  assert.equal(namesAreAffine(null, "anything"), false);
+});
+
+test("isSingleBuyerBurst - fires at >=20 organic from exactly 1 buyer, protects the honest 4-from-1", () => {
+  assert.equal(SINGLE_BUYER_MIN, 20);
+  assert.equal(isSingleBuyerBurst(50, 1), true);   // VEGETA-shaped
+  assert.equal(isSingleBuyerBurst(20, 1), true);   // boundary
+  assert.equal(isSingleBuyerBurst(19, 1), false);  // just under
+  assert.equal(isSingleBuyerBurst(4, 1), false);   // honest Gitlawb->TheMetaBot stays CLEAN
+  assert.equal(isSingleBuyerBurst(50, 2), false);  // 2 distinct buyers is not a single-buyer burst
+  assert.equal(isSingleBuyerBurst(0, 0), false);
+});
+
+test("classifyDemandRowWash - flags reciprocal pairs / single-buyer / seed / test-name, spares clean rows", () => {
+  const A = "0x" + "a".repeat(40), B = "0x" + "b".repeat(40);
+  const graph = new Map([
+    [A, { distinctClients: 1, soleClient: B, completed: 49 }],
+    [B, { distinctClients: 1, soleClient: A, completed: 49 }],
+  ]);
+  const noName = () => false;
+  // reciprocal metronome pair A<->B (VEGETA/iCLONE-shaped)
+  const rA = classifyDemandRowWash({ providerAddress: A, completed: 49, distinctClients: 1 }, graph, new Set(), noName);
+  assert.equal(rA.washLikely, true);
+  assert.ok(rA.washReasons.includes("reciprocal_pair"));
+  assert.ok(rA.washReasons.includes("single_buyer"));
+  assert.equal(String(rA.reciprocalPartner).toLowerCase(), B);
+  // farm seed
+  const C = "0x" + "c".repeat(40);
+  const rC = classifyDemandRowWash({ providerAddress: C, completed: 3, distinctClients: 2 }, new Map(), new Set([C]), noName);
+  assert.deepEqual(rC.washReasons, ["farm_seed"]);
+  // test-harness name
+  const rD = classifyDemandRowWash({ providerAddress: "0x" + "d".repeat(40), providerName: "acp-e2e-buyer", completed: 1, distinctClients: 1 }, new Map(), new Set(), nameLooksTestHarness);
+  assert.ok(rD.washReasons.includes("test_harness_name"));
+  // clean provider: multiple distinct buyers, not seeded -> not wash
+  const E = "0x" + "e".repeat(40);
+  const rE = classifyDemandRowWash({ providerAddress: E, completed: 8, distinctClients: 5 }, new Map(), new Set(), noName);
+  assert.equal(rE.washLikely, false);
+  assert.deepEqual(rE.washReasons, []);
+  // v0.19 review fix: a LOW-VOLUME mutual pair (below RECIPROCAL_MIN_COMPLETED) is an
+  // incidental cross-purchase, NOT a metronome -> must NOT be flagged reciprocal_pair.
+  const F = "0x" + "f".repeat(40), G = "0x" + "0".repeat(39) + "1";
+  const smallGraph = new Map([
+    [F, { distinctClients: 1, soleClient: G, completed: 2 }],
+    [G, { distinctClients: 1, soleClient: F, completed: 2 }],
+  ]);
+  const rF = classifyDemandRowWash({ providerAddress: F, completed: 2, distinctClients: 1 }, smallGraph, new Set(), noName);
+  assert.equal(rF.washReasons.includes("reciprocal_pair"), false);
+  assert.equal(rF.washLikely, false);
+  // a self-loop (sole client is itself) is NOT a reciprocal PAIR
+  const H = "0x" + "a".repeat(39) + "b";
+  const selfGraph = new Map([[H, { distinctClients: 1, soleClient: H, completed: 40 }]]);
+  const rH = classifyDemandRowWash({ providerAddress: H, completed: 40, distinctClients: 1 }, selfGraph, new Set(), noName);
+  assert.equal(rH.washReasons.includes("reciprocal_pair"), false);
+});
+
+test("cloneVerdictFromSignals - weight-0 legibility signals do NOT move the verdict", () => {
+  // Two wash-buyer legibility signals (the exclusion already neutralised them) must
+  // NOT sum to SUSPICIOUS on an otherwise-clean agent (the `|| 1` coercion bug).
+  const legibility = [
+    { signal: "boost_farm_buyers", weight: 0 },
+    { signal: "name_family_buyers", weight: 0 },
+  ];
+  assert.deepEqual(cloneVerdictFromSignals(legibility), { score: 0, verdict: "CLEAN" });
+  // single_buyer_burst is a deliberate weight-2 lever -> SUSPICIOUS.
+  assert.equal(cloneVerdictFromSignals([{ signal: "single_buyer_burst", weight: 2 }]).verdict, "SUSPICIOUS");
+  // dispositive markers are LIKELY_CLONE regardless of score.
+  assert.equal(cloneVerdictFromSignals([{ signal: "off_platform_resource_hosts", weight: 2 }]).verdict, "LIKELY_CLONE");
+  // legacy weightless signals still count as 1 each (two -> SUSPICIOUS).
+  assert.equal(cloneVerdictFromSignals([{ signal: "bulk_offering_count" }, { signal: "bulk_offerings_no_external_demand" }]).verdict, "SUSPICIOUS");
+  assert.deepEqual(cloneVerdictFromSignals([]), { score: 0, verdict: "CLEAN" });
 });
 
 test("computeTrustVerdict - a boost-farm-only agent cannot mint VERIFIED (organic farm-stripped to 0)", () => {

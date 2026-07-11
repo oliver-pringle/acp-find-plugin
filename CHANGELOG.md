@@ -2,6 +2,66 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.19.0 - 2026-07-11 - wash gen-3 detectors (reciprocal-pair / single-buyer / name-affinity)
+
+Minor - additive. No MCP tool added, removed, or re-signed; the tool surface stays 47 full /
+20 core. New response fields only. RoFlo Round 27 (`demand-census.md` §7) proved two live wash
+patterns that evaded the v0.18.x seed + name filters.
+
+### Added - detection
+
+- **Reciprocal-pair wash.** `acp_clone_screen` / `acp_agent_trust` strip a buyer that sells
+  (almost) exclusively BACK to the screened agent (VEGETA<->iCLONE metronome). Structural,
+  bounded per-buyer probe (`isReciprocalBuyer`, floor `RECIPROCAL_MIN_COMPLETED=5` so a small
+  honest exclusive relationship is not stripped), highest-volume buyers probed first, fail-open;
+  the probe-cap coverage gap is surfaced (`reciprocalProbeTruncated`). `acp_v2_demand` flags
+  reciprocal rows in-scan (same completion floor + self-loop guard).
+- **Name-family wash.** `namesAreAffine` strips operator-companion buyers whose name is
+  NEAR-IDENTICAL to the seller's (same base, short-suffix difference: Taste/Tasty/taster).
+  Reduced from an earlier prefix/acronym/shared-token form after an adversarial review measured
+  false-positives on legitimate same-vertical agents (25 collisions in a 69-agent sample); the
+  weaker forms are ceded to the reciprocal / seed / single-buyer detectors.
+- **Single-buyer burst.** `>=20` organic completions from exactly ONE buyer hard-caps the clone
+  verdict at SUSPICIOUS (`isSingleBuyerBurst`, `SINGLE_BUYER_MIN=20`). The floor preserves the
+  one honest 4-from-1 organic signal (stays VERIFIED).
+- New clone_screen signals: `reciprocal_wash_buyers`, `name_family_buyers`, `single_buyer_burst`,
+  `reciprocal_probe_truncated`.
+- **Scoring fix.** The clone-verdict score used `(weight || 1)`, coercing a deliberately-zero
+  legibility weight to 1; two wash-exclusion signals wrongly summed to SUSPICIOUS on an
+  otherwise-organic agent. Extracted to `cloneVerdictFromSignals` with `Number.isFinite` so a
+  `weight:0` signal contributes 0 (legibility-only) and does not move the verdict.
+
+### Added - MCP surface
+
+- `acp_v2_demand` rows carry `washLikely` + `washReasons`
+  (`reciprocal_pair | single_buyer | farm_seed | test_harness_name`) + optional
+  `reciprocalPartner`; response carries a `washSummary { flagged, cleanProviders }`.
+- `boostExcludedCount` now also counts reciprocal + name-family exclusions (meaning unchanged:
+  "wash buyers excluded"); the `acp_agent_trust` reason text generalised to "wash completion(s)".
+
+### Added - backend context
+
+- Four farm seeds in `BOOST_FARM_WALLETS` + gateway `appsettings.json TrustSignals:FarmWallets`
+  (served via the `farmWallets` Resource): VEGETA `0xe09f4011…8584`, iCLONE `0x44cc25d5…6664`,
+  gitlawb-test-buyer `0xec6ff51b…5627`, Producer/Suede burst `0xbdaa681f…cf2c`.
+
+### Backward compatibility
+
+- Purely additive. Existing fields and verdict cascade unchanged. The honest organic buyer
+  (Gitlawb_Mercenary) is regression-tested to remain organic and is explicitly NOT seeded.
+
+### Verification
+
+- `node --check server.js`; `npm test` (75 tests, +6). New pure helpers exported and unit-tested
+  (name-affinity near-identical positives + the reviewed intra-vertical false-positive negatives,
+  single-buyer boundary, demand-row classifier incl. reciprocal floor + self-loop, weight-0
+  legibility scoring). Live smoke `smoke-v0.19.0.mjs` against the real gateway/indexer: VEGETA
+  organic->0/LIKELY_CLONE, TheMetaBot stays CLEAN with organic Gitlawb preserved, Taste's
+  Tasty/taster stripped, demand rows flag reciprocal_pair.
+- Adversarial multi-agent review (4 dimensions x verify) drove the name-affinity reduction, the
+  reciprocal completion floor, the probe-ordering + truncation surfacing, and the weight-0 scoring
+  fix.
+
 ## v0.18.2 - 2026-07-04 - e2e-test-loop wash detector
 
 Patch - additive. Extends the v0.18.1 wash filter to the named e2e-test-loop economy that passes `clone_screen`. No tool added or removed; no signature changed.

@@ -352,6 +352,13 @@ const BOOST_FARM_WALLETS = new Set([
   // pass clone_screen CLEAN. Also caught heuristically by nameLooksTestHarness.
   "0x72e1a2a350d9640d9d9abceece32713a781923b5", // "acp-e2e-buyer" (DataPort Arena sole buyer, 5 jobs/24min)
   "0x24c168db8aefbe14d24110abdcc11f502e182fec", // "TestAgent" (ArAIstotle sole buyer, 6x factCheck)
+  // RoFlo R27 (2026-07-09): the reciprocal-metronome pair + burst wallets that topped the
+  // feed. VEGETA/iCLONE are ALSO caught structurally by isReciprocalBuyer (v0.19); seeding
+  // them makes the exclusion immediate on the gateway/edge without a per-buyer fetch.
+  "0xe09f40114af6c78788a8003da127c49c56158584", // "VEGETA" (reciprocal wash pair w/ iCLONE, 49/49 @ $0.05/10min)
+  "0x44cc25d55a4291b92f52062ba023ca1f14206664", // "iCLONE" (reciprocal wash pair w/ VEGETA)
+  "0xec6ff51b394f6cda716b84b87e6b260331935627", // "gitlawb-test-buyer" (sole buyer of Gitlawb's own offerings; also nameLooksTestHarness)
+  "0xbdaa681f63dc45cf2575038a045ef73d1116cf2c", // (unregistered) Producer-by-Suede-Labs burst buyer (25 completions / 30min)
 ]);
 
 // An offering set "looks boosty" if it sells a mutual-boost / reciprocal / buyback product.
@@ -373,6 +380,123 @@ function offeringsLookBoosty(offerings) {
 const TEST_HARNESS_RE = /\b(?:e2e|end[\s_-]?to[\s_-]?end)\b|\btest[\s_-]?(?:agent|buyer|harness|bot|runner|client)\b|\bsmoke[\s_-]?test\b|\b(?:qa|ci)[\s_-]?(?:buyer|runner|bot)\b|\bacp[\s_-]?e2e\b/i;
 function nameLooksTestHarness(name) {
   return TEST_HARNESS_RE.test(String(name ?? ""));
+}
+
+// A single repeat buyer is not diverse demand. At/above this many ORGANIC (post
+// seed/name/reciprocal strip) completions from exactly ONE buyer, a provider is a
+// single-buyer burst (RoFlo R27: Laguna 25, Producer 27, Pulse 33, VEGETA 50,
+// Cybercentry 91). 20 sits ABOVE the honest Gitlawb->TheMetaBot signal (4 from 1
+// buyer stays VERIFIED) and BELOW every observed wash burst.
+const SINGLE_BUYER_MIN = 20;
+function isSingleBuyerBurst(organicExternalCompleted, organicDistinctBuyers) {
+  return (Number(organicExternalCompleted) || 0) >= SINGLE_BUYER_MIN
+    && (Number(organicDistinctBuyers) || 0) === 1;
+}
+
+// --- v0.19 name-affinity (operator-family wash) ---------------------------
+// Normalize a name for structural comparison: lowercase, alphanumerics only.
+// "Taste" -> "taste"; "Tasty" -> "tasty".
+function normalizeAgentName(name) {
+  return String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function commonPrefixLen(a, b) {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return i;
+}
+
+// Do two agent names look like the SAME operator's family? Restricted (RoFlo R27
+// review) to NEAR-IDENTICAL names — two names that agree on a prefix covering >=80%
+// of the LONGER one, i.e. they differ only in a short suffix: Taste/Tasty/taster.
+// Deliberately narrow: the earlier shared-token / acronym forms empirically
+// false-positived on legitimate intra-vertical brands (25 collisions in a 69-agent
+// sample — a "* Video *" buying from a "* Video *", "AlphaGuard" vs "AlphaBot", a
+// 4-word buyer whose initials spell "base"/"defi"), erasing honest third-party
+// demand. Only the near-identical case is a safe operator-family signal; the weaker
+// forms are ceded to the reciprocal / seed / single-buyer detectors.
+function namesAreAffine(nameA, nameB) {
+  const a = normalizeAgentName(nameA);
+  const b = normalizeAgentName(nameB);
+  if (a.length < 3 || b.length < 3) return false;
+  if (a === b) return true;
+  const pfx = commonPrefixLen(a, b);
+  return pfx >= 4 && pfx >= 0.8 * Math.max(a.length, b.length);
+}
+
+// --- v0.19 reciprocal-pair wash ------------------------------------------
+// A reciprocal-wash pair does DOZENS of jobs on a metronome (VEGETA/iCLONE 49/49);
+// a floor well above an incidental cross-purchase avoids stripping a small honest
+// exclusive relationship (e.g. a brand-new agent whose first few sales all go to one
+// launch customer). Applied to both the clone-screen probe and the demand flag.
+const RECIPROCAL_MIN_COMPLETED = 5;
+
+// Is buyer `b` a reciprocal-wash partner of screened provider `agentAddress`? I.e.
+// does `b` sell (almost) exclusively BACK to the agent — the VEGETA<->iCLONE
+// metronome. Bounded: one wallet-resolve + one job-page for `b`. FAIL-OPEN — a
+// fetch error must never strip a real buyer. `safe` is the caller's runner.
+async function isReciprocalBuyer(agentAddress, buyerAddress, safe) {
+  const run = safe ?? (async (fn) => { try { return await fn(); } catch { return null; } });
+  const A = String(agentAddress).toLowerCase();
+  const B = String(buyerAddress).toLowerCase();
+  const rec = await run(() => indexerResolveWallet(B));
+  const uuid = rec?.id;
+  if (!uuid) return { reciprocal: false };
+  const raw = await run(() => indexerAgentJobs(uuid));
+  if (!Array.isArray(raw)) return { reciprocal: false };
+  const bProviderCompleted = raw
+    .map((j) => shapeIndexerJob(j, uuid, B))
+    .filter((j) => j.role === "provider"
+      && String(j.jobStatus).toUpperCase() === "COMPLETED"
+      && j.counterparty?.address);
+  const n = bProviderCompleted.length;
+  if (n < RECIPROCAL_MIN_COMPLETED) return { reciprocal: false, completedProviderJobs: n };
+  const toA = bProviderCompleted.filter((j) => String(j.counterparty.address).toLowerCase() === A).length;
+  const share = toA / n;
+  return { reciprocal: share >= 0.9, share, sellsBackTo: toA, completedProviderJobs: n };
+}
+
+// --- v0.19 demand-row wash classifier (pure) ------------------------------
+// Given one acp_v2_demand provider row + a precomputed in-scan sell graph
+// (addr -> { distinctClients, soleClient, completed }), plus the frozen seed set
+// and the test-harness name predicate, decide whether the row is wash-likely.
+// Advisory: the activity sample is bounded, so reciprocity is in-scan only.
+function classifyDemandRowWash(row, graph, seeds, testNameFn) {
+  const reasons = [];
+  const addr = String(row?.providerAddress ?? "").toLowerCase();
+  let reciprocalPartner;
+  if (seeds && seeds.has(addr)) reasons.push("farm_seed");
+  if (testNameFn && testNameFn(row?.providerName)) reasons.push("test_harness_name");
+  if ((Number(row?.distinctClients) || 0) === 1 && (Number(row?.completed) || 0) >= SINGLE_BUYER_MIN) {
+    reasons.push("single_buyer");
+  }
+  const self = graph?.get?.(addr);
+  const soleClient = self?.soleClient ? String(self.soleClient).toLowerCase() : null;
+  const partner = soleClient ? graph?.get?.(soleClient) : null;
+  // Reciprocal metronome: self and its SOLE client each sell only to the other, and
+  // BOTH sides clear the completion floor (a 1x1/2x2 incidental cross-purchase is not
+  // wash). Exclude the self-loop degenerate case (soleClient === self).
+  if (soleClient && soleClient !== addr && partner && partner.soleClient
+    && String(partner.soleClient).toLowerCase() === addr
+    && (Number(self.completed) || 0) >= RECIPROCAL_MIN_COMPLETED
+    && (Number(partner.completed) || 0) >= RECIPROCAL_MIN_COMPLETED) {
+    reasons.push("reciprocal_pair");
+    reciprocalPartner = self.soleClient;
+  }
+  return { washLikely: reasons.length > 0, washReasons: reasons, reciprocalPartner };
+}
+
+// Pure clone verdict from accumulated signals. off-platform-host / timestamp-spam
+// markers are dispositive (LIKELY_CLONE); otherwise score >= 2 -> SUSPICIOUS. An
+// explicit weight of 0 is LEGIBILITY-ONLY and must contribute 0 (a bare `|| 1`
+// coerces 0 -> 1, which let two wash-buyer legibility signals wrongly mint
+// SUSPICIOUS on an otherwise-organic agent — v0.19 fix).
+function cloneVerdictFromSignals(signals) {
+  const list = Array.isArray(signals) ? signals : [];
+  const strong = list.some((s) => s.signal === "off_platform_resource_hosts" || s.signal === "hourly_timestamp_offering_spam");
+  const score = list.reduce((s, x) => s + (Number.isFinite(x.weight) ? x.weight : 1), 0);
+  return { score, verdict: strong ? "LIKELY_CLONE" : score >= 2 ? "SUSPICIOUS" : "CLEAN" };
 }
 
 // Heuristic wash-buyer detector for a BUYER wallet: does it SELL a boost product, OR
@@ -470,7 +594,7 @@ function computeTrustVerdict({ clone, security, reputation, found }) {
   return { verdict, score: verdict === "UNKNOWN" ? 0 : computeTrustScore({ clone, security, reputation }) };
 }
 
-export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks, offeringsLookBoosty, nameLooksTestHarness, TEST_HARNESS_RE, BOOST_FARM_WALLETS };
+export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks, offeringsLookBoosty, nameLooksTestHarness, TEST_HARNESS_RE, BOOST_FARM_WALLETS, namesAreAffine, normalizeAgentName, isSingleBuyerBurst, classifyDemandRowWash, SINGLE_BUYER_MIN, isReciprocalBuyer, cloneVerdictFromSignals };
 
 // --- SSRF guard --------------------------------------------------------------
 // Blocks acp_resource_call from being weaponised into a request-from-MCP-host
@@ -3188,11 +3312,36 @@ const HANDLERS = {
       cursor = r?.meta?.nextCursor ?? r?.nextCursor;
       if (!cursor || items.length === 0) break;
     }
-    const providers = [...byProvider.values()]
+    // v0.19 wash graph: reciprocity needs EVERY provider's sole-client (a row's
+    // partner can sit outside the top slice), so build the graph from the full map
+    // before slicing.
+    const graph = new Map();
+    for (const e of byProvider.values()) {
+      graph.set(e.providerAddress, {
+        distinctClients: e.clients.size,
+        soleClient: e.clients.size === 1 ? [...e.clients][0] : null,
+        completed: e.completed,
+      });
+    }
+    const rows = [...byProvider.values()]
       .map((e) => ({ providerAddress: e.providerAddress, providerName: e.providerName, completed: e.completed, distinctClients: e.clients.size, jobsSeen: e.jobsSeen, marketplaceUrl: agentUrl(e.providerAddress) }))
       .sort((a, b) => b.completed - a.completed || b.distinctClients - a.distinctClients)
       .slice(0, limit);
-    return wrapUntrusted({ pagesScanned: pages, providersSeen: byProvider.size, providers });
+    const providers = rows.map((row) => {
+      const { washLikely, washReasons, reciprocalPartner } = classifyDemandRowWash(row, graph, BOOST_FARM_WALLETS, nameLooksTestHarness);
+      return { ...row, washLikely, washReasons, ...(reciprocalPartner ? { reciprocalPartner } : {}) };
+    });
+    const flagged = providers.filter((p) => p.washLikely).length;
+    return wrapUntrusted({
+      pagesScanned: pages,
+      providersSeen: byProvider.size,
+      washSummary: {
+        flagged,
+        cleanProviders: providers.length - flagged,
+        note: "washLikely is an advisory in-scan flag over a bounded activity sample (reciprocity/single-buyer/seed/test-name); use acp_clone_screen or acp_agent_trust for an authoritative verdict.",
+      },
+      providers,
+    });
   },
 
   acp_clone_screen: async (args) => {
@@ -3228,25 +3377,71 @@ const HANDLERS = {
       // on a loop is manufactured volume, not organic demand, and must not mint VERIFIED
       // (RoFlo R25 - MicroCoord2.ai's agentRiskCheck loop had inflated TheMetaBot).
       const rawBuyers = [...new Set(organicRaw.map((j) => String(j.counterparty.address).toLowerCase()))];
+      // Buyer display names come free from the agent's own job rows (shapeIndexerJob
+      // carries counterparty.name) — used for the v0.19 name-affinity test.
+      const buyerNames = new Map();
+      for (const j of organicRaw) {
+        const a = String(j.counterparty.address).toLowerCase();
+        if (!buyerNames.get(a) && j.counterparty?.name) buyerNames.set(a, j.counterparty.name);
+      }
       const boostBuyers = await classifyBoostBuyers(rawBuyers, safe);
-      const organic = organicRaw.filter((j) => !boostBuyers.has(String(j.counterparty.address).toLowerCase()));
+      const screenedName = profile?.agentName ?? agent?.name ?? null;
+      // v0.19 name-family wash (RoFlo R27: Taste/Tasty/taster) — a buyer whose name is
+      // affine with the seller's is almost certainly an operator companion wallet.
+      const affineBuyers = new Set(
+        rawBuyers.filter((a) => !boostBuyers.has(a) && screenedName && namesAreAffine(screenedName, buyerNames.get(a)))
+      );
+      // v0.19 reciprocal-pair wash (RoFlo R27: VEGETA<->iCLONE) — a buyer that sells
+      // (almost) exclusively BACK to this agent is a mutual-boost partner, not demand.
+      // Probe the highest-VOLUME not-yet-excluded buyers first (a metronome partner has
+      // the most completions here), bounded; fail-open (never strip on error). If buyers
+      // beyond the cap go un-probed, that coverage gap is surfaced (not silently dropped).
+      const RECIPROCAL_PROBE_CAP = 8;
+      const buyerCompletions = new Map();
+      for (const j of organicRaw) {
+        const a = String(j.counterparty.address).toLowerCase();
+        buyerCompletions.set(a, (buyerCompletions.get(a) || 0) + 1);
+      }
+      const probeCandidates = rawBuyers
+        .filter((a) => !boostBuyers.has(a) && !affineBuyers.has(a))
+        .sort((x, y) => (buyerCompletions.get(y) || 0) - (buyerCompletions.get(x) || 0));
+      const probe = probeCandidates.slice(0, RECIPROCAL_PROBE_CAP);
+      const reciprocalProbeTruncated = probeCandidates.length > probe.length;
+      const reciprocalBuyers = new Set();
+      await Promise.all(probe.map(async (a) => {
+        const r = await isReciprocalBuyer(wallet, a, safe);
+        if (r?.reciprocal) reciprocalBuyers.add(a);
+      }));
+      const washBuyers = new Set([...boostBuyers, ...affineBuyers, ...reciprocalBuyers]);
+      const organic = organicRaw.filter((j) => !washBuyers.has(String(j.counterparty.address).toLowerCase()));
       // Distinct organic buyers — "96 completions from 1 buyer" is not the same demand
       // signal as "96 from 50". Surfaced in the trust delivery lane + headline (v0.16.3).
       const organicBuyers = new Set(organic.map((j) => String(j.counterparty.address).toLowerCase()));
       const boostExcludedCount = organicRaw.length - organic.length;
-      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length, organicDistinctBuyers: organicBuyers.size, organicExternalCompletedRaw: organicRaw.length, boostExcludedCount, boostFarmBuyers: [...boostBuyers].slice(0, 10) };
-      if (boostExcludedCount > 0) signals.push({ signal: "boost_farm_buyers", detail: { excluded: boostExcludedCount, buyers: [...boostBuyers].slice(0, 6) }, weight: 0 });
+      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length, organicDistinctBuyers: organicBuyers.size, organicExternalCompletedRaw: organicRaw.length, boostExcludedCount, boostFarmBuyers: [...washBuyers].slice(0, 10), reciprocalProbed: probe.length, reciprocalProbeTruncated };
+      if (boostExcludedCount > 0) signals.push({ signal: "boost_farm_buyers", detail: { excluded: boostExcludedCount, buyers: [...washBuyers].slice(0, 6) }, weight: 0 });
+      // v0.19 legibility: distinguish WHY a buyer was stripped from organic.
+      if (affineBuyers.size) signals.push({ signal: "name_family_buyers", detail: { count: affineBuyers.size, buyers: [...affineBuyers].slice(0, 6) }, weight: 0 });
+      if (reciprocalBuyers.size) signals.push({ signal: "reciprocal_wash_buyers", detail: { count: reciprocalBuyers.size, buyers: [...reciprocalBuyers].slice(0, 6) }, weight: 0 });
+      // Coverage honesty: if organic buyers beyond the probe cap went un-probed for
+      // reciprocity, say so rather than let an unseen wash partner read as organic.
+      if (reciprocalProbeTruncated) signals.push({ signal: "reciprocal_probe_truncated", detail: { probed: probe.length, candidates: probeCandidates.length }, weight: 0 });
+      // v0.19 single-buyer burst: large ORGANIC volume from exactly one buyer is not
+      // diverse demand — hard-cap the verdict at SUSPICIOUS (RoFlo R27). The >=20 floor
+      // protects the honest Gitlawb->TheMetaBot 4-from-1 signal (stays CLEAN/VERIFIED).
+      if (isSingleBuyerBurst(jobs.organicExternalCompleted, jobs.organicDistinctBuyers)) {
+        signals.push({ signal: "single_buyer_burst", detail: { organicExternalCompleted: jobs.organicExternalCompleted, organicDistinctBuyers: 1 }, weight: 2 });
+      }
       // Only meaningful as a clone tell alongside bulk offerings — a legit new
       // bot with only internal/dogfood completions is NOT suspicious on its own.
       if (jobs.total >= 1 && jobs.externalCompleted === 0 && offerings.length >= 30) {
         signals.push({ signal: "bulk_offerings_no_external_demand", detail: jobs, weight: 1 });
       }
     }
-    // Off-platform resource hosts and hourly-timestamp spam are dispositive
-    // clone markers; the supporting signals only escalate to SUSPICIOUS.
-    const strong = signals.some((s) => s.signal === "off_platform_resource_hosts" || s.signal === "hourly_timestamp_offering_spam");
-    const score = signals.reduce((s, x) => s + (x.weight || 1), 0);
-    const verdict = strong ? "LIKELY_CLONE" : score >= 2 ? "SUSPICIOUS" : "CLEAN";
+    // Off-platform resource hosts and hourly-timestamp spam are dispositive clone
+    // markers; supporting signals only escalate to SUSPICIOUS. weight:0 signals are
+    // legibility-only (see cloneVerdictFromSignals).
+    const { score, verdict } = cloneVerdictFromSignals(signals);
     return wrapUntrusted({
       agentAddress: wallet,
       agentName: profile?.agentName ?? agent?.name,
@@ -3301,7 +3496,7 @@ const HANDLERS = {
     reasons.push(clone.organicExternalCompleted >= 1
       ? `${clone.organicExternalCompleted} organic completion(s) from ${clone.organicDistinctBuyers} buyer(s)`
       : (clone.externalCompleted >= 1 ? `${clone.externalCompleted} completion(s), none organic (portfolio/dogfood)` : "no external completions"));
-    if ((Number(cloneJobs?.boostExcludedCount) || 0) > 0) reasons.push(`${cloneJobs.boostExcludedCount} boost-farm completion(s) excluded`);
+    if ((Number(cloneJobs?.boostExcludedCount) || 0) > 0) reasons.push(`${cloneJobs.boostExcludedCount} wash completion(s) excluded (boost-farm / reciprocal / name-family)`);
 
     return wrapUntrusted({
       agentAddress: wallet,
