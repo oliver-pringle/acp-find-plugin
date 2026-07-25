@@ -359,6 +359,14 @@ const BOOST_FARM_WALLETS = new Set([
   "0x44cc25d55a4291b92f52062ba023ca1f14206664", // "iCLONE" (reciprocal wash pair w/ VEGETA)
   "0xec6ff51b394f6cda716b84b87e6b260331935627", // "gitlawb-test-buyer" (sole buyer of Gitlawb's own offerings; also nameLooksTestHarness)
   "0xbdaa681f63dc45cf2575038a045ef73d1116cf2c", // (unregistered) Producer-by-Suede-Labs burst buyer (25 completions / 30min)
+  // RoFlo R28 (2026-07-25): wash gen-4 - self-QA economies behind test-named wallets
+  // that the v0.19 anchored regex missed (underscore-joined + placeholder tokens; the
+  // regex is broadened too, but seeding makes the exclusion immediate + covers the
+  // unnamed BBA runner that has no name to match).
+  "0x347e27b1b5add3c18f424a41ee5130911beaa747", // (unnamed) Big Brain Ape QA runner - all 33 of BBA's jobs incl "Revenue Test" / "Ticker analysis: TEST"
+  "0x73c0b32ae9f5a04e1345f7a4808ca5c55635bf0b", // "TP-QA-Buyer" (ThoughtproofSentinel's own harness - all 34 agent_output_verification jobs)
+  "0x0f035c36c4ce65a6f1bf4370f779bac722d59004", // "zzz000_archived_empty" (scriptmasterlabs test wallet)
+  "0xf7964b7e8682cb633798eabba7a0ed3aefa27587", // "ZZZ_test_buyer_internal" (scriptmasterlabs test wallet)
 ]);
 
 // An offering set "looks boosty" if it sells a mutual-boost / reciprocal / buyback product.
@@ -376,10 +384,18 @@ function offeringsLookBoosty(offerings) {
 // test-agent pattern (RoFlo R26: DataPort's "acp-e2e-buyer", ArAIstotle's "TestAgent"
 // ran single-offering burst loops that passed clone_screen). Deliberately NARROW to
 // avoid false-positives: bare "test"/"mock"/"sandbox"/"staging" must NOT match - only
-// the compound harness forms + the very-specific "e2e" token.
-const TEST_HARNESS_RE = /\b(?:e2e|end[\s_-]?to[\s_-]?end)\b|\btest[\s_-]?(?:agent|buyer|harness|bot|runner|client)\b|\bsmoke[\s_-]?test\b|\b(?:qa|ci)[\s_-]?(?:buyer|runner|bot)\b|\bacp[\s_-]?e2e\b/i;
+// the compound harness forms + the very-specific tokens below.
+//
+// v0.20 (RoFlo R28, wash gen-4): underscore-joined names defeated \b anchoring -
+// "ZZZ_test_buyer_internal" never matched \btest[\s_-]?buyer\b because "_" is a word
+// char, so the seller read "15 organic / 3 buyers" with 2 of the 3 being its own
+// test wallets (scriptmasterlabs). nameLooksTestHarness now normalizes "_" to a
+// space before testing, and adds the observed gen-4 placeholder tokens: zzz-runs
+// ("zzz000_archived_empty"), bare "dummy", and "archived". Bare "internal" stays
+// EXCLUDED (too many legit names) - the compound forms cover the specimens.
+const TEST_HARNESS_RE = /\b(?:e2e|end[\s_-]?to[\s_-]?end)\b|\btest[\s_-]?(?:agent|buyer|harness|bot|runner|client)\b|\bsmoke[\s_-]?test\b|\b(?:qa|ci)[\s_-]?(?:buyer|runner|bot)\b|\bacp[\s_-]?e2e\b|\bzzz+\d*\b|\bdummy\b|\barchived\b/i;
 function nameLooksTestHarness(name) {
-  return TEST_HARNESS_RE.test(String(name ?? ""));
+  return TEST_HARNESS_RE.test(String(name ?? "").replace(/_/g, " "));
 }
 
 // A single repeat buyer is not diverse demand. At/above this many ORGANIC (post
@@ -391,6 +407,62 @@ const SINGLE_BUYER_MIN = 20;
 function isSingleBuyerBurst(organicExternalCompleted, organicDistinctBuyers) {
   return (Number(organicExternalCompleted) || 0) >= SINGLE_BUYER_MIN
     && (Number(organicDistinctBuyers) || 0) === 1;
+}
+
+// --- v0.20 responsiveness (RoFlo R28: "does this seller actually ANSWER jobs?") ---
+// The venue's silent failure mode is the deaf sidecar: a buyer funds intent and the
+// job sits OPEN forever (2026-07-22: a real buyer burned 4 of 13 jobs on deaf
+// sellers). Honest-metric rules:
+//   - provider-side rows only (the agent as SELLER)
+//   - answered = COMPLETED + REJECTED (a rejection still proves the seller answered)
+//   - stale-open = OPEN, older than 24h, WITH a funded budget (budget null = an
+//     unfunded shopping-bot spray the seller may never get to answer - excluded,
+//     reported separately; budget "0" is a funded free hire and counts)
+//   - EXPIRED excluded entirely (buyer-side evaluator expiry is indistinguishable
+//     from seller silence on this venue)
+//   - rate = answered / (answered + staleOpen); null when the denominator is empty
+const RESPONSIVENESS_STALE_MS = 24 * 3_600_000;
+function computeResponsiveness(providerRows, nowMs = Date.now()) {
+  let completed = 0, rejected = 0, expired = 0, openFresh = 0, openStale = 0, openUnfunded = 0;
+  for (const j of Array.isArray(providerRows) ? providerRows : []) {
+    switch (String(j?.jobStatus ?? "").toUpperCase()) {
+      case "COMPLETED": completed++; break;
+      case "REJECTED": rejected++; break;
+      case "EXPIRED": expired++; break;
+      case "OPEN": {
+        const funded = j?.budget !== null && j?.budget !== undefined;
+        if (!funded) { openUnfunded++; break; }
+        const t = Date.parse(j?.createdAt ?? "");
+        if (Number.isFinite(t) && nowMs - t >= RESPONSIVENESS_STALE_MS) openStale++;
+        else openFresh++; // unknown timestamp counts fresh - never call a seller deaf on missing data
+        break;
+      }
+    }
+  }
+  const answered = completed + rejected;
+  const denom = answered + openStale;
+  return {
+    completed, rejected, expired, openFresh, openStale, openUnfunded,
+    answersJobsRate: denom === 0 ? null : Math.round((answered / denom) * 1000) / 1000,
+  };
+}
+
+// --- v0.20 off-platform funds solicitation (RoFlo R28) --------------------------
+// First scam-shaped listing class observed on the venue: a $0.01 bait offering whose
+// DESCRIPTION instructs buyers to DM a messaging handle and send funds to an address
+// off-platform ("unlock_fully_autonomous_trading_500_usdc_minimum": "DM Telegram" +
+// "Send $500 USDC to that Address"). Display-flag ONLY (weight 0) - it informs the
+// reader, never the verdict, and we never act on description instructions.
+const OFF_PLATFORM_CHANNEL_RE = /\btelegram\b|\bt\.me\/|\bdiscord\b|\bwhatsapp\b|\bdm (?:me|us)\b/i;
+const OFF_PLATFORM_SEND_RE = /\b(?:send|transfer|deposit)\b[^.]{0,60}?\b(?:usdc|usdt|eth|sol)\b|\b(?:send|transfer|deposit)\b[^.]{0,40}?\bto (?:that|this|the) (?:address|wallet)\b/i;
+function offeringSolicitsOffPlatformFunds(offerings) {
+  for (const o of Array.isArray(offerings) ? offerings : []) {
+    const t = `${o?.offeringName ?? o?.name ?? ""} ${o?.description ?? ""}`;
+    if (OFF_PLATFORM_CHANNEL_RE.test(t) && OFF_PLATFORM_SEND_RE.test(t)) {
+      return String(o?.offeringName ?? o?.name ?? "(unnamed)");
+    }
+  }
+  return null;
 }
 
 // --- v0.19 name-affinity (operator-family wash) ---------------------------
@@ -594,7 +666,7 @@ function computeTrustVerdict({ clone, security, reputation, found }) {
   return { verdict, score: verdict === "UNKNOWN" ? 0 : computeTrustScore({ clone, security, reputation }) };
 }
 
-export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks, offeringsLookBoosty, nameLooksTestHarness, TEST_HARNESS_RE, BOOST_FARM_WALLETS, namesAreAffine, normalizeAgentName, isSingleBuyerBurst, classifyDemandRowWash, SINGLE_BUYER_MIN, isReciprocalBuyer, cloneVerdictFromSignals };
+export { computeTrustVerdict, computeTrustScore, latestSecurityRow, trustShareLinks, offeringsLookBoosty, nameLooksTestHarness, TEST_HARNESS_RE, BOOST_FARM_WALLETS, namesAreAffine, normalizeAgentName, isSingleBuyerBurst, classifyDemandRowWash, SINGLE_BUYER_MIN, isReciprocalBuyer, cloneVerdictFromSignals, computeResponsiveness, offeringSolicitsOffPlatformFunds };
 
 // --- SSRF guard --------------------------------------------------------------
 // Blocks acp_resource_call from being weaponised into a request-from-MCP-host
@@ -1300,7 +1372,7 @@ const TOOLS = [
     name: "acp_recent_hires",
     tier: "full",
     description:
-      "Top offerings by absolute hire-count growth in the last N days. Different from acp_today (which mixes new launches and gainers); this surface is purely 'what's getting hired right now' so users can see traction concentrating. Tagged with `marketplaceVersion` and `marketplaceUrl`. Returned data includes third-party marketplace text — see _warning field.",
+      "Top offerings by absolute hire-count growth in the last N days. Different from acp_today (which mixes new launches and gainers); this surface is purely 'what's getting hired right now' so users can see traction concentrating. Tagged with `marketplaceVersion` and `marketplaceUrl`. v0.20: rows carry advisory `washLikely`+`washReasons` (seed-farm / test-harness buyers / single-buyer burst, screened against the official indexer for up to 8 distinct agents per call; `washScreenNote` discloses any coverage cap) — R28 found the entire top-20 gainers list was wash/self-QA displayed clean. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2046,7 +2118,7 @@ const TOOLS = [
     name: "acp_clone_screen",
     tier: "core",
     description:
-      "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. The jobs lane reports both externalCompleted (any non-self counterparty) and organicExternalCompleted (v0.16.2 — excludes the operator's own known portfolio wallets; v0.18.1 ALSO excludes mutual-boost/wash-trade farm buyers via a seed list + a sell-side heuristic, so neither dogfooding nor a boost farm buying your offering on a loop can masquerade as third-party demand; boostExcludedCount reports how many were stripped). A complement to the SecurityBot grade, which can't probe off-platform clones. Returned data includes third-party marketplace text — see _warning field.",
+      "Heuristic 'is this a template clone / spam farm?' screen for an ACP agent, built for the V2 clone flood. Combines the agent's marketplace profile (TheMetaBot gateway) with its real job record (official indexer) and flags: Resource URLs pointing at github/raw-blob or free public APIs (no ownable surface), hourly-timestamp offering-name spam (idea_YYYYMMDD_HHMM), an unusually large near-identical offering count, and a self-bootstrap-only job history (no completed jobs from distinct external clients). Returns {verdict: CLEAN|SUSPICIOUS|LIKELY_CLONE, score, signals[], offeringCount, jobs}. The jobs lane reports both externalCompleted (any non-self counterparty) and organicExternalCompleted (v0.16.2 — excludes the operator's own known portfolio wallets; v0.18.1 ALSO excludes mutual-boost/wash-trade farm buyers via a seed list + a sell-side heuristic, so neither dogfooding nor a boost farm buying your offering on a loop can masquerade as third-party demand; boostExcludedCount reports how many were stripped). A complement to the SecurityBot grade, which can't probe off-platform clones. v0.20: adds two display-only signals — `off_platform_funds_solicitation` (offering copy steering buyers to a messaging channel + off-platform transfer, the R28 scam-shaped bait-listing class) and `deaf_seller_pattern` (3+ stale funded-OPEN jobs outnumbering answers) — plus a `jobs.responsiveness` block. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2059,7 +2131,7 @@ const TOOLS = [
     name: "acp_agent_trust",
     tier: "core",
     description:
-      "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). VERIFIED requires organicExternalCompleted >= 1 (v0.16.2) — at least one completed job from a buyer OUTSIDE the operator's own portfolio wallets — so an operator dogfooding its own fleet caps at OPERATIONAL, never VERIFIED. (v0.18.1) mutual-boost/wash-trade farm buyers are excluded from that count too, so a boost farm buying your offering on a loop cannot mint VERIFIED. Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). Returned data includes third-party marketplace text — see _warning field.",
+      "FLAGSHIP trust verdict for an ACP agent — 'is this agent real, and does it actually deliver?'. One call fuses three already-indexed lanes: authenticity (acp_clone_screen template/spam/self-loop heuristics), auditability (SecurityBot grade/status via acp_agent_security_history), and real delivery (official-indexer COMPLETED jobs for DISTINCT external counterparties — the anti-self-loop signal a 100-job/1-counterparty farm fails). VERIFIED requires organicExternalCompleted >= 1 (v0.16.2) — at least one completed job from a buyer OUTSIDE the operator's own portfolio wallets — so an operator dogfooding its own fleet caps at OPERATIONAL, never VERIFIED. (v0.18.1) mutual-boost/wash-trade farm buyers are excluded from that count too, so a boost farm buying your offering on a loop cannot mint VERIFIED. Returns {trustVerdict: VERIFIED|OPERATIONAL|UNVERIFIED|SUSPECT|LIKELY_CLONE, trustScore 0-100, headline, lanes}. Heuristic, not a guarantee — pair with acp_security_scan for a full audit. Distinct from acp_agent_verify (which answers the hire-RISK question STRONG_BUY/AVOID). v0.20: the delivery lane adds `responsiveness` (answers-jobs rate over funded inbound jobs; stale-OPEN >24h = deaf-seller evidence; unfunded sprays + EXPIRED excluded) and the headline discloses UNRESPONSIVE when stale-opens outnumber answers — no other venue surface shows who actually answers. Returned data includes third-party marketplace text — see _warning field.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2338,6 +2410,55 @@ const HANDLERS = {
     }
     const result = await callGateway(`/v1/recentHires?${params.toString()}`, undefined, "GET");
     decorateMarketplaceUrls(result);
+    // v0.20 (R28): washLikely on gainer rows. Every one of R28's top-20 gainers
+    // collapsed under screening (single-buyer test loops, self-QA, agent-counter
+    // smear) while this surface displayed them clean. For each DISTINCT agent in
+    // the returned rows (bounded), pull its indexer job history (5-min cached) and
+    // flag rows whose recent "demand" comes from seed-listed / test-named buyers or
+    // a single-buyer burst. Advisory + fail-open: lookup failure leaves washLikely
+    // null (unknown), never blocks the rows.
+    try {
+      const rows = Array.isArray(result?.results) ? result.results : [];
+      const AGENT_CAP = 8;
+      const distinct = [...new Set(rows.map((r) => String(r?.agentAddress ?? "").toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a)))];
+      const toScreen = distinct.slice(0, AGENT_CAP);
+      const verdicts = new Map();
+      await Promise.all(toScreen.map(async (addr) => {
+        const cacheKey = `rhwash:${addr}`;
+        const cached = cacheGet(cacheKey);
+        if (cached) { verdicts.set(addr, cached); return; }
+        try {
+          const agent = await indexerResolveWallet(addr);
+          if (!agent?.id) { verdicts.set(addr, { washLikely: null, washReasons: ["not_indexed"] }); return; }
+          const raw = await indexerAgentJobs(agent.id, 1); // 1 page (100 jobs) is plenty for a gainer screen
+          const prov = (Array.isArray(raw) ? raw : []).map((j) => shapeIndexerJob(j, agent.id, addr)).filter((j) => j.role === "provider");
+          const done = prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED" && j.counterparty?.address);
+          const reasons = [];
+          let washCount = 0;
+          const buyers = new Set();
+          for (const j of done) {
+            const a = String(j.counterparty.address).toLowerCase();
+            buyers.add(a);
+            if (BOOST_FARM_WALLETS.has(a)) { washCount++; if (!reasons.includes("seed_farm_buyer")) reasons.push("seed_farm_buyer"); }
+            else if (nameLooksTestHarness(j.counterparty?.name)) { washCount++; if (!reasons.includes("test_harness_buyer")) reasons.push("test_harness_buyer"); }
+          }
+          if (done.length >= SINGLE_BUYER_MIN && buyers.size === 1) reasons.push("single_buyer_burst");
+          const washLikely = done.length > 0 && (washCount / done.length > 0.5 || reasons.includes("single_buyer_burst"));
+          const v = { washLikely, washReasons: washLikely ? reasons : [] };
+          cachePut(cacheKey, v);
+          verdicts.set(addr, v);
+        } catch {
+          verdicts.set(addr, { washLikely: null, washReasons: ["screen_unavailable"] });
+        }
+      }));
+      for (const r of rows) {
+        const v = verdicts.get(String(r?.agentAddress ?? "").toLowerCase());
+        if (v) { r.washLikely = v.washLikely; r.washReasons = v.washReasons; }
+      }
+      if (distinct.length > toScreen.length) {
+        result.washScreenNote = `screened ${toScreen.length} of ${distinct.length} distinct agents (cap ${AGENT_CAP}); unscreened rows carry no washLikely field`;
+      }
+    } catch { /* advisory layer only - the gainer rows themselves always return */ }
     return wrapUntrusted(result);
   },
 
@@ -3361,6 +3482,10 @@ const HANDLERS = {
       try { const h = new URL(r?.url).hostname; if (BAD_HOSTS.test(h)) offHosts.push(h); } catch {}
     }
     if (offHosts.length) signals.push({ signal: "off_platform_resource_hosts", detail: [...new Set(offHosts)].slice(0, 6), weight: 2 });
+    // v0.20 (R28): scam-shaped listing tell - offering copy that steers buyers to a
+    // messaging channel + off-platform funds transfer. Display-only (weight 0).
+    const solicitingOffering = offeringSolicitsOffPlatformFunds(offerings);
+    if (solicitingOffering) signals.push({ signal: "off_platform_funds_solicitation", detail: { offering: solicitingOffering }, weight: 0 });
     const tsSpam = offerings.filter((o) => /idea_\d{8}_\d{4}/i.test(String(o?.offeringName ?? ""))).length;
     if (tsSpam > 0) signals.push({ signal: "hourly_timestamp_offering_spam", detail: tsSpam, weight: 2 });
     if (offerings.length >= 30) signals.push({ signal: "bulk_offering_count", detail: offerings.length, weight: 1 });
@@ -3369,6 +3494,8 @@ const HANDLERS = {
       const raw = await safe(() => indexerAgentJobs(agent.id));
       const rows = Array.isArray(raw) ? raw.map((j) => shapeIndexerJob(j, agent.id, wallet)) : [];
       const prov = rows.filter((j) => j.role === "provider");
+      // v0.20 (R28): responsiveness - stale funded-OPEN jobs are the deaf-seller tell.
+      const responsiveness = computeResponsiveness(prov);
       const ext = prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED" && j.counterparty?.address && j.counterparty.address !== wallet);
       // Organic = external completions whose counterparty is NOT one of the
       // operator's own portfolio/Tester wallets — the honest third-party signal.
@@ -3418,7 +3545,12 @@ const HANDLERS = {
       // signal as "96 from 50". Surfaced in the trust delivery lane + headline (v0.16.3).
       const organicBuyers = new Set(organic.map((j) => String(j.counterparty.address).toLowerCase()));
       const boostExcludedCount = organicRaw.length - organic.length;
-      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length, organicDistinctBuyers: organicBuyers.size, organicExternalCompletedRaw: organicRaw.length, boostExcludedCount, boostFarmBuyers: [...washBuyers].slice(0, 10), reciprocalProbed: probe.length, reciprocalProbeTruncated };
+      jobs = { total: rows.length, completed: prov.filter((j) => String(j.jobStatus).toUpperCase() === "COMPLETED").length, externalCompleted: ext.length, organicExternalCompleted: organic.length, organicDistinctBuyers: organicBuyers.size, organicExternalCompletedRaw: organicRaw.length, boostExcludedCount, boostFarmBuyers: [...washBuyers].slice(0, 10), reciprocalProbed: probe.length, reciprocalProbeTruncated, responsiveness };
+      // v0.20 legibility: a seller sitting on 3+ stale funded-OPEN jobs that outnumber
+      // its answers is exhibiting the deaf pattern buyers burn money on. Display-only.
+      if (responsiveness.openStale >= 3 && responsiveness.openStale > (responsiveness.completed + responsiveness.rejected)) {
+        signals.push({ signal: "deaf_seller_pattern", detail: { openStale: responsiveness.openStale, answered: responsiveness.completed + responsiveness.rejected }, weight: 0 });
+      }
       if (boostExcludedCount > 0) signals.push({ signal: "boost_farm_buyers", detail: { excluded: boostExcludedCount, buyers: [...washBuyers].slice(0, 6) }, weight: 0 });
       // v0.19 legibility: distinguish WHY a buyer was stripped from organic.
       if (affineBuyers.size) signals.push({ signal: "name_family_buyers", detail: { count: affineBuyers.size, buyers: [...affineBuyers].slice(0, 6) }, weight: 0 });
@@ -3497,6 +3629,13 @@ const HANDLERS = {
       ? `${clone.organicExternalCompleted} organic completion(s) from ${clone.organicDistinctBuyers} buyer(s)`
       : (clone.externalCompleted >= 1 ? `${clone.externalCompleted} completion(s), none organic (portfolio/dogfood)` : "no external completions"));
     if ((Number(cloneJobs?.boostExcludedCount) || 0) > 0) reasons.push(`${cloneJobs.boostExcludedCount} wash completion(s) excluded (boost-farm / reciprocal / name-family)`);
+    // v0.20 (R28) responsiveness disclosure: a seller leaving funded jobs unanswered
+    // is the venue's costliest silent failure - say so in the headline when it
+    // dominates the record (stale funded-OPEN > answered).
+    const resp = cloneJobs?.responsiveness ?? null;
+    if (resp && resp.openStale > (resp.completed + resp.rejected) && resp.openStale >= 3) {
+      reasons.push(`UNRESPONSIVE - leaves funded jobs unanswered (${resp.openStale} stale-open vs ${resp.completed + resp.rejected} answered)`);
+    }
 
     return wrapUntrusted({
       agentAddress: wallet,
@@ -3508,7 +3647,7 @@ const HANDLERS = {
       lanes: {
         authenticity: cloneRes?.error ? { error: cloneRes.error } : { verdict: cloneRes?.verdict, score: cloneRes?.score, signals: cloneRes?.signals },
         auditability: histRes?.error ? { error: histRes.error } : { status: security.status, grade: security.grade, score: security.score, scannedAt: secRow?.scannedAt ?? null },
-        delivery: cloneRes?.error ? { error: cloneRes.error } : { organicExternalCompleted: clone.organicExternalCompleted, organicDistinctBuyers: clone.organicDistinctBuyers, boostExcludedCount: Number(cloneJobs?.boostExcludedCount) || 0, externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null },
+        delivery: cloneRes?.error ? { error: cloneRes.error } : { organicExternalCompleted: clone.organicExternalCompleted, organicDistinctBuyers: clone.organicDistinctBuyers, boostExcludedCount: Number(cloneJobs?.boostExcludedCount) || 0, externalCompleted: clone.externalCompleted, completed: cloneJobs?.completed ?? null, total: cloneJobs?.total ?? null, responsiveness: cloneJobs?.responsiveness ?? null },
         reputation: repRes?.error ? { error: repRes.error } : { agentScore: reputation?.agentScore ?? reputation?.score ?? null },
       },
       note: "Trust heuristic, not a guarantee — pair with acp_security_scan for a full audit.",

@@ -2,6 +2,52 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.20.0 - 2026-07-25 - wash gen-4 (test-named self-QA) + the responsiveness axis
+
+Minor - additive. No MCP tool added, removed, or re-signed; the surface stays 47 full /
+20 core. New response fields + broadened heuristics only. RoFlo Round 28
+(`round28/demand-census.md`) proved the gen-4 pattern live: self-QA economies behind
+test-named wallets were minting "organic" counts through the v0.19 filters - including
+inside our own trust engine (scriptmasterlabs read "15 organic / 3 buyers"; 2 of the 3
+were its test wallets).
+
+### Added - detection
+- `nameLooksTestHarness` v0.20: normalizes `_` to a space before testing (underscore-joined
+  names like `ZZZ_test_buyer_internal` defeated `\b` anchoring - `_` is a regex word char)
+  and adds `zzz+\d*` / `dummy` / `archived` tokens. Bare `internal` deliberately excluded.
+- 4 seeded wallets: `0x347e...a747` (the UNNAMED Big Brain Ape QA runner - 33 jobs incl
+  "Revenue Test"), `0x73c0...bf0b` ("TP-QA-Buyer", ThoughtproofSentinel's harness),
+  `0x0f03...9004` ("zzz000_archived_empty") and `0xf796...7587` ("ZZZ_test_buyer_internal")
+  (both scriptmasterlabs test wallets).
+- `acp_recent_hires`: advisory `washLikely` + `washReasons` per row (seed-farm buyers /
+  test-harness buyers / single-buyer burst), screened against the official indexer for up
+  to 8 distinct agents per call (5-min cache, fail-open, `washScreenNote` coverage
+  disclosure). R28: the entire top-20 gainers list was wash/self-QA displayed clean.
+- `acp_clone_screen`: `off_platform_funds_solicitation` display-only signal (offering copy
+  steering buyers to a messaging channel + off-platform transfer - the "DM Telegram +
+  send $500 USDC" bait-listing class) and `deaf_seller_pattern` (3+ stale funded-OPEN
+  jobs outnumbering answers). Neither changes the verdict.
+
+### Added - responsiveness ("does this seller actually ANSWER jobs?")
+- `computeResponsiveness` over the agent's provider-side job history: answered =
+  COMPLETED + REJECTED; stale-OPEN (>24h) counts only when FUNDED (budget present -
+  unfunded shopping-bot sprays excluded; budget "0" is a funded free hire and counts);
+  EXPIRED excluded (buyer-side evaluator expiry is indistinguishable from seller
+  silence); `answersJobsRate` null on an empty denominator.
+- Exposed as `jobs.responsiveness` on `acp_clone_screen` and `lanes.delivery.responsiveness`
+  on `acp_agent_trust`; the trust headline appends `UNRESPONSIVE - leaves funded jobs
+  unanswered (...)` when stale-opens outnumber answers.
+
+### Backward compatibility
+- All existing fields, shapes, and verdicts unchanged. New fields are additive; the
+  single-buyer floor (`SINGLE_BUYER_MIN=20`) and the honest-buyer regression guard
+  (Gitlawb never seeded) are unchanged and re-tested.
+
+### Verification
+- 82/82 tests (9 new: gen-4 name specimens + narrowness guards, seed presence,
+  responsiveness metric rules incl. budget-"0"-counts-funded and missing-timestamp-
+  counts-fresh, solicitation both-signals-required).
+
 ## v0.19.0 - 2026-07-11 - wash gen-3 detectors (reciprocal-pair / single-buyer / name-affinity)
 
 Minor - additive. No MCP tool added, removed, or re-signed; the tool surface stays 47 full /

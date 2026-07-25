@@ -11,6 +11,15 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.20.0
+
+Wash generation 4 + the responsiveness axis (RoFlo R28). No new tools - the surface stays 20 core / 47 full; every change is additive.
+
+- **Wash gen-4: test-named self-QA buyers are caught.** Operators now QA their own catalogs through real escrow using obvious test wallets that v0.19's anchored regex missed - underscore-joined names ("ZZZ_test_buyer_internal" - `_` is a regex word char, so `\btest\b` never fired) and placeholder tokens ("zzz000_archived_empty"). The heuristic now normalizes underscores and adds `zzz`-run / `dummy` / `archived` tokens (bare "internal" stays excluded - too many legit names). Four newly-confirmed wallets are seeded, including the **unnamed** Big Brain Ape QA runner that no name heuristic can catch. Real-world effect: a seller that read "15 organic completions from 3 buyers" drops to its honest ~1 - two of the three "buyers" were its own test wallets.
+- **`acp_recent_hires` rows carry `washLikely` + `washReasons`.** R28's screening found the ENTIRE top-20 gainers list was wash/self-QA/counter-artifact - displayed clean. Each returned row's agent is now screened against the official indexer (seed-farm buyers, test-harness buyers, single-buyer bursts; up to 8 distinct agents per call, 5-min cached, fail-open with a `washScreenNote` disclosing any coverage cap).
+- **`acp_agent_trust` gains responsiveness - "does this seller actually ANSWER jobs?"** The delivery lane adds `responsiveness` {completed, rejected, expired, openFresh, openStale, openUnfunded, answersJobsRate} computed from the agent's real job history. Honest-metric rules: a REJECTED job still proves the seller answered; stale-OPEN (>24h) counts only when the job was FUNDED (unfunded shopping-bot sprays are excluded); EXPIRED is excluded entirely (buyer-side evaluator expiry is indistinguishable from seller silence); rate is null - never a fake 0 or 100 - when there is no denominator. When stale-opens outnumber answers the headline says **UNRESPONSIVE**. Context: on 2026-07-22 a real buyer burned 4 of its 13 funded jobs on deaf sellers; no other venue surface shows who answers.
+- **`acp_clone_screen` flags `off_platform_funds_solicitation`** - the first scam-shaped bait-listing class observed on the venue: a $0.01 offering whose description instructs buyers to DM a Telegram handle and "Send $500 USDC to that Address". Display-only signal (it never changes the verdict, and the screen never acts on description instructions). Also adds `deaf_seller_pattern` (3+ stale funded-OPEN jobs outnumbering answers) and the `jobs.responsiveness` block.
+
 ## What's new in v0.19.0
 
 **Three structural wash detectors close the gen-3 blind spots.** The V2 wash trade evolved

@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { computeTrustVerdict, computeTrustScore, latestSecurityRow, offeringsLookBoosty, nameLooksTestHarness, BOOST_FARM_WALLETS, namesAreAffine, isSingleBuyerBurst, classifyDemandRowWash, SINGLE_BUYER_MIN, cloneVerdictFromSignals } from "./server.js";
+import { computeTrustVerdict, computeTrustScore, latestSecurityRow, offeringsLookBoosty, nameLooksTestHarness, BOOST_FARM_WALLETS, namesAreAffine, isSingleBuyerBurst, classifyDemandRowWash, SINGLE_BUYER_MIN, cloneVerdictFromSignals, computeResponsiveness, offeringSolicitsOffPlatformFunds } from "./server.js";
 import * as server from "./server.js";
 
 // Spin up a one-shot HTTP stub gateway. Returns { url, close, requestLog }.
@@ -283,6 +283,79 @@ test("nameLooksTestHarness - does NOT flag legit names containing 'test'/'sandbo
   assert.equal(nameLooksTestHarness("DataPort Arena"), false);
   assert.equal(nameLooksTestHarness(""), false);
   assert.equal(nameLooksTestHarness(null), false);
+});
+
+// --- v0.20 wash gen-4 (R28: underscore-joined + placeholder test names) ---
+test("nameLooksTestHarness v0.20 - catches the R28 gen-4 specimens", () => {
+  assert.equal(nameLooksTestHarness("ZZZ_test_buyer_internal"), true);  // underscore defeated \b in v0.19
+  assert.equal(nameLooksTestHarness("zzz000_archived_empty"), true);    // zzz-run + archived
+  assert.equal(nameLooksTestHarness("TP-QA-Buyer"), true);              // qa-buyer compound
+  assert.equal(nameLooksTestHarness("dummy wallet"), true);
+});
+
+test("nameLooksTestHarness v0.20 - new tokens stay narrow (no false positives)", () => {
+  assert.equal(nameLooksTestHarness("Dizzy Trader"), false);     // zz inside a word is not a zzz token
+  assert.equal(nameLooksTestHarness("Jazz Archive"), false);     // "archive" != "archived"
+  assert.equal(nameLooksTestHarness("Internal Audit Pro"), false); // bare "internal" deliberately excluded
+  assert.equal(nameLooksTestHarness("Pizzazz Bot"), false);
+});
+
+test("BOOST_FARM_WALLETS - R28 gen-4 self-QA wallets seeded", () => {
+  assert.ok(BOOST_FARM_WALLETS.has("0x347e27b1b5add3c18f424a41ee5130911beaa747")); // BBA QA runner (unnamed)
+  assert.ok(BOOST_FARM_WALLETS.has("0x73c0b32ae9f5a04e1345f7a4808ca5c55635bf0b")); // TP-QA-Buyer
+  assert.ok(BOOST_FARM_WALLETS.has("0x0f035c36c4ce65a6f1bf4370f779bac722d59004")); // zzz000_archived_empty
+  assert.ok(BOOST_FARM_WALLETS.has("0xf7964b7e8682cb633798eabba7a0ed3aefa27587")); // ZZZ_test_buyer_internal
+});
+
+// --- v0.20 responsiveness (R28: stale funded-OPEN = deaf seller) ---
+test("computeResponsiveness - honest-metric rules", () => {
+  const now = Date.parse("2026-07-25T12:00:00Z");
+  const old = "2026-07-20T00:00:00Z";
+  const fresh = "2026-07-25T11:00:00Z";
+  const rows = [
+    { jobStatus: "COMPLETED", budget: "50000", createdAt: old },
+    { jobStatus: "COMPLETED", budget: "50000", createdAt: old },
+    { jobStatus: "REJECTED", budget: "50000", createdAt: old },
+    { jobStatus: "OPEN", budget: "50000", createdAt: old },    // funded + stale -> deaf evidence
+    { jobStatus: "OPEN", budget: "0", createdAt: old },        // budget "0" is FUNDED (free hire) -> stale
+    { jobStatus: "OPEN", budget: null, createdAt: old },       // unfunded spray -> excluded
+    { jobStatus: "OPEN", budget: "50000", createdAt: fresh },  // fresh -> excluded
+    { jobStatus: "EXPIRED", budget: "50000", createdAt: old }, // ambiguous -> excluded
+  ];
+  const r = computeResponsiveness(rows, now);
+  assert.equal(r.completed, 2);
+  assert.equal(r.rejected, 1);
+  assert.equal(r.openStale, 2);
+  assert.equal(r.openUnfunded, 1);
+  assert.equal(r.openFresh, 1);
+  assert.equal(r.expired, 1);
+  assert.equal(r.answersJobsRate, 0.6); // (2+1)/(3+2)
+});
+
+test("computeResponsiveness - null rate on empty denominator, missing timestamp counts fresh", () => {
+  const now = Date.now();
+  assert.equal(computeResponsiveness([], now).answersJobsRate, null);
+  const r = computeResponsiveness([{ jobStatus: "OPEN", budget: "1", createdAt: undefined }], now);
+  assert.equal(r.openFresh, 1);   // never call a seller deaf on missing data
+  assert.equal(r.openStale, 0);
+  assert.equal(r.answersJobsRate, null);
+});
+
+// --- v0.20 off-platform funds solicitation (R28: the BBA bait listing) ---
+test("offeringSolicitsOffPlatformFunds - flags channel + send-funds copy", () => {
+  const hit = offeringSolicitsOffPlatformFunds([{
+    offeringName: "unlock_fully_autonomous_trading_500_usdc_minimum",
+    description: "DM my Telegram to get started. Send $500 USDC to that address and trading begins.",
+  }]);
+  assert.equal(hit, "unlock_fully_autonomous_trading_500_usdc_minimum");
+});
+
+test("offeringSolicitsOffPlatformFunds - needs BOTH signals (no false positives)", () => {
+  // Channel mention without a funds ask (a Telegram alert bot) - clean.
+  assert.equal(offeringSolicitsOffPlatformFunds([{ offeringName: "tg_alerts", description: "Sends price alerts to your Telegram channel." }]), null);
+  // Funds language without an off-platform channel (a swap/bridge bot) - clean.
+  assert.equal(offeringSolicitsOffPlatformFunds([{ offeringName: "bridge_quote", description: "Quotes the cheapest route to transfer USDC to Base." }]), null);
+  assert.equal(offeringSolicitsOffPlatformFunds([]), null);
 });
 
 // --- v0.19 wash gen-3 detectors (reciprocal-pair / single-buyer / name-affinity) ---
