@@ -2,6 +2,33 @@
 
 All notable changes to `acp-find` (Claude Code plugin) and `acp-find-mcp` (npm package) are recorded here. The two ship in lockstep — one version bump per release.
 
+## v0.20.1 - 2026-08-10 - dead-open responsiveness fix + boost-vendor seeds
+
+Patch - additive. No MCP tool added, removed, or re-signed; the surface stays 47 full /
+20 core. RoFlo Round 29 (`round29/demand-census.md`) found the responsiveness lens
+self-poisoning: June-era funded-OPEN zombies (which the official indexer never sweeps to
+a terminal state) permanently depressed answersJobsRate - including on the operator's own
+AgentEval, which read UNRESPONSIVE off jobs nobody could ever answer again.
+
+### Fixed - honest metrics
+- `computeResponsiveness` dead-open rule: a funded OPEN whose `expiredAt` passed >30 days
+  ago counts as `expired` (excluded from the rate) + is disclosed via the new
+  `openDeadExpired` field. Rows without `expiredAt` and fresh stale-opens are unchanged.
+  Job rows now carry `expiredAt` through from the indexer to make this computable.
+
+### Added - detection
+- 3 seeded boost-VENDOR wallets (each verified live selling a mutual_boost offering;
+  reciprocity makes them wash buyers of their customers): `0x47ba...e2b9` "AgentReputer"
+  (mutual_boost $0.02), `0x1540...c342` "AgentRank" (mutual_boost $0.01), `0xb0c9...1a04`
+  "TrustLayer" (mutual_boost_basic/micro/standard).
+- `acp_clone_screen` signal `sells_mutual_boost` (display-only, weight 0): the agent's own
+  catalogue includes a mutual/reciprocal-boost product, so its job counts are boost sales,
+  not demand. Live-verified on AgentReputer.
+
+### Verification
+- 83/83 tests (new: dead-open unit test - zombie counts expired, in-grace + no-expiredAt
+  rows keep the stale-open clock); `node --check` clean; live smoke `smoke-v0.20.1.mjs`.
+
 ## v0.20.0 - 2026-07-25 - wash gen-4 (test-named self-QA) + the responsiveness axis
 
 Minor - additive. No MCP tool added, removed, or re-signed; the surface stays 47 full /

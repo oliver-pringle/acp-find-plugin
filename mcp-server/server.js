@@ -367,6 +367,15 @@ const BOOST_FARM_WALLETS = new Set([
   "0x73c0b32ae9f5a04e1345f7a4808ca5c55635bf0b", // "TP-QA-Buyer" (ThoughtproofSentinel's own harness - all 34 agent_output_verification jobs)
   "0x0f035c36c4ce65a6f1bf4370f779bac722d59004", // "zzz000_archived_empty" (scriptmasterlabs test wallet)
   "0xf7964b7e8682cb633798eabba7a0ed3aefa27587", // "ZZZ_test_buyer_internal" (scriptmasterlabs test wallet)
+  // RoFlo R29 (2026-08-10): boost-VENDOR wallets - the sell side of the mutual_boost
+  // economy (verified live 2026-08-10: each SELLS a mutual_boost offering). Mutual
+  // boost is reciprocal by construction, so a vendor wallet is also a wash BUYER of
+  // its customers; seeding makes the exclusion immediate without a per-buyer fetch
+  // (same rationale as VEGETA/iCLONE). offeringsLookBoosty already catches their
+  // sell side; these seeds close the buy side.
+  "0x47ba351968c4ec5a1e8e63830536b247b4bde2b9", // "AgentReputer" (mutual_boost $0.02, ~151 jobs)
+  "0x154080b68a80cd002ed09a146caa9e314aeec342", // "AgentRank" (mutual_boost $0.01, ~137 jobs)
+  "0xb0c93af05024c84759d6cccb9d8d98e4ba0a1a04", // "TrustLayer" (mutual_boost_basic/micro/standard $0.05/$0.01/$0.10)
 ]);
 
 // An offering set "looks boosty" if it sells a mutual-boost / reciprocal / buyback product.
@@ -421,9 +430,16 @@ function isSingleBuyerBurst(organicExternalCompleted, organicDistinctBuyers) {
 //   - EXPIRED excluded entirely (buyer-side evaluator expiry is indistinguishable
 //     from seller silence on this venue)
 //   - rate = answered / (answered + staleOpen); null when the denominator is empty
+//   - dead-open (v0.20.1): the indexer never sweeps terminal states, so a funded
+//     OPEN whose expiredAt passed >30d ago is EXPIRED in substance (observed: job
+//     70339 expiredAt 2026-07-24, terminalStatusAt still null 16d later). Counted
+//     as expired + disclosed as openDeadExpired - an ancient zombie a seller can
+//     no longer answer is history, not deaf-seller evidence. Rows without an
+//     expiredAt fall through to the stale-open clock unchanged.
 const RESPONSIVENESS_STALE_MS = 24 * 3_600_000;
+const DEAD_OPEN_GRACE_MS = 30 * 24 * 3_600_000;
 function computeResponsiveness(providerRows, nowMs = Date.now()) {
-  let completed = 0, rejected = 0, expired = 0, openFresh = 0, openStale = 0, openUnfunded = 0;
+  let completed = 0, rejected = 0, expired = 0, openFresh = 0, openStale = 0, openUnfunded = 0, openDeadExpired = 0;
   for (const j of Array.isArray(providerRows) ? providerRows : []) {
     switch (String(j?.jobStatus ?? "").toUpperCase()) {
       case "COMPLETED": completed++; break;
@@ -432,6 +448,8 @@ function computeResponsiveness(providerRows, nowMs = Date.now()) {
       case "OPEN": {
         const funded = j?.budget !== null && j?.budget !== undefined;
         if (!funded) { openUnfunded++; break; }
+        const exp = Date.parse(j?.expiredAt ?? "");
+        if (Number.isFinite(exp) && nowMs - exp >= DEAD_OPEN_GRACE_MS) { expired++; openDeadExpired++; break; }
         const t = Date.parse(j?.createdAt ?? "");
         if (Number.isFinite(t) && nowMs - t >= RESPONSIVENESS_STALE_MS) openStale++;
         else openFresh++; // unknown timestamp counts fresh - never call a seller deaf on missing data
@@ -442,7 +460,7 @@ function computeResponsiveness(providerRows, nowMs = Date.now()) {
   const answered = completed + rejected;
   const denom = answered + openStale;
   return {
-    completed, rejected, expired, openFresh, openStale, openUnfunded,
+    completed, rejected, expired, openFresh, openStale, openUnfunded, openDeadExpired,
     answersJobsRate: denom === 0 ? null : Math.round((answered / denom) * 1000) / 1000,
   };
 }
@@ -1030,6 +1048,7 @@ function shapeIndexerJob(j, uuid, wallet) {
     budget: j?.budget,
     createdAt: j?.createdAt,
     updatedAt: j?.updatedAt,
+    expiredAt: j?.expiredAt,
   };
 }
 
@@ -3486,6 +3505,10 @@ const HANDLERS = {
     // messaging channel + off-platform funds transfer. Display-only (weight 0).
     const solicitingOffering = offeringSolicitsOffPlatformFunds(offerings);
     if (solicitingOffering) signals.push({ signal: "off_platform_funds_solicitation", detail: { offering: solicitingOffering }, weight: 0 });
+    // v0.20.1 (R29): the boost economy's SELL side - a catalogue that includes a
+    // mutual-boost / reciprocal-boost product. Display-only (weight 0): job counts on
+    // such an agent are boost sales, not demand (buy-side exclusion = the farm seeds).
+    if (offeringsLookBoosty(offerings)) signals.push({ signal: "sells_mutual_boost", weight: 0 });
     const tsSpam = offerings.filter((o) => /idea_\d{8}_\d{4}/i.test(String(o?.offeringName ?? ""))).length;
     if (tsSpam > 0) signals.push({ signal: "hourly_timestamp_offering_spam", detail: tsSpam, weight: 2 });
     if (offerings.length >= 30) signals.push({ signal: "bulk_offering_count", detail: offerings.length, weight: 1 });

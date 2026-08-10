@@ -305,6 +305,10 @@ test("BOOST_FARM_WALLETS - R28 gen-4 self-QA wallets seeded", () => {
   assert.ok(BOOST_FARM_WALLETS.has("0x73c0b32ae9f5a04e1345f7a4808ca5c55635bf0b")); // TP-QA-Buyer
   assert.ok(BOOST_FARM_WALLETS.has("0x0f035c36c4ce65a6f1bf4370f779bac722d59004")); // zzz000_archived_empty
   assert.ok(BOOST_FARM_WALLETS.has("0xf7964b7e8682cb633798eabba7a0ed3aefa27587")); // ZZZ_test_buyer_internal
+  // R29 boost vendors (sell side of mutual_boost - also wash buyers by reciprocity)
+  assert.ok(BOOST_FARM_WALLETS.has("0x47ba351968c4ec5a1e8e63830536b247b4bde2b9")); // AgentReputer
+  assert.ok(BOOST_FARM_WALLETS.has("0x154080b68a80cd002ed09a146caa9e314aeec342")); // AgentRank
+  assert.ok(BOOST_FARM_WALLETS.has("0xb0c93af05024c84759d6cccb9d8d98e4ba0a1a04")); // TrustLayer
 });
 
 // --- v0.20 responsiveness (R28: stale funded-OPEN = deaf seller) ---
@@ -339,6 +343,25 @@ test("computeResponsiveness - null rate on empty denominator, missing timestamp 
   assert.equal(r.openFresh, 1);   // never call a seller deaf on missing data
   assert.equal(r.openStale, 0);
   assert.equal(r.answersJobsRate, null);
+});
+
+// --- v0.20.1 dead-open rule (R29: the indexer never sweeps terminal states) ---
+test("computeResponsiveness - funded OPEN past expiredAt+30d counts expired, not deaf", () => {
+  const now = Date.parse("2026-08-10T00:00:00Z");
+  const rows = [
+    // June zombie: funded, expiry passed ~6 weeks ago -> expired-in-substance
+    { jobStatus: "OPEN", budget: "990000", createdAt: "2026-06-28T02:13:00Z", expiredAt: "2026-06-28T02:23:00Z" },
+    // expiry passed but inside the 30d grace -> still on the stale-open clock
+    { jobStatus: "OPEN", budget: "50000", createdAt: "2026-08-01T00:00:00Z", expiredAt: "2026-08-05T00:00:00Z" },
+    // no expiredAt on the row -> unchanged stale-open clock
+    { jobStatus: "OPEN", budget: "50000", createdAt: "2026-08-01T00:00:00Z" },
+    { jobStatus: "COMPLETED", budget: "50000", createdAt: "2026-08-06T00:00:00Z" },
+  ];
+  const r = computeResponsiveness(rows, now);
+  assert.equal(r.openDeadExpired, 1);
+  assert.equal(r.expired, 1);
+  assert.equal(r.openStale, 2);
+  assert.equal(r.answersJobsRate, Math.round((1 / 3) * 1000) / 1000);
 });
 
 // --- v0.20 off-platform funds solicitation (R28: the BBA bait listing) ---

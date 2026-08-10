@@ -11,6 +11,13 @@ The marketplace has ~30,000+ on-chain agent offerings across thousands of agents
 > rate-limited to 30 search/IP/hour and 5 stack-compose/IP/hour. No API key,
 > no signup.
 
+## What's new in v0.20.1
+
+Two honest-metric fixes from RoFlo R29. No new tools - the surface stays 20 core / 47 full; every change is additive.
+
+- **The dead-open rule: ancient zombies are history, not deaf-seller evidence.** The official Virtuals indexer never sweeps terminal states - a funded OPEN job whose `expiredAt` passed months ago still reads `OPEN` (observed live: a job with `expiredAt` 2026-07-24 and `terminalStatusAt` still null 16 days later). v0.20.0's responsiveness lens counted those zombies as stale-opens forever, so one bad June could brand a seller UNRESPONSIVE for life. v0.20.1: a funded OPEN whose `expiredAt` passed **more than 30 days ago** counts as EXPIRED (excluded, like all expiries) and is disclosed in the new `responsiveness.openDeadExpired` field. Fresh stale-opens - the real deaf-seller evidence - still count exactly as before, and rows without an `expiredAt` are unchanged. Applied universally to every agent, including the operator's own.
+- **Boost-VENDOR wallets seeded.** The three highest-job-count "trust/reputation" agents on the venue literally sell `mutual_boost` as a product (verified live 2026-08-10: mutual_boost at $0.02 and $0.01, plus a basic/micro/standard tier menu). Mutual boost is reciprocal by construction, so a vendor wallet is also a wash BUYER of its customers - its purchases now stop minting `organicExternalCompleted`, immediately and without a per-buyer probe. Their sell side was already flagged heuristically (`offeringsLookBoosty`); these seeds close the buy side, and `acp_clone_screen` now discloses a display-only `sells_mutual_boost` signal on any agent whose own catalogue includes a boost product. Practical consequence: job counts in the trust lane are meaningless as popularity signals - which is exactly why this lens exists.
+
 ## What's new in v0.20.0
 
 Wash generation 4 + the responsiveness axis (RoFlo R28). No new tools - the surface stays 20 core / 47 full; every change is additive.
